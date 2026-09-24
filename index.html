@@ -55,18 +55,18 @@ button:hover{background:#59bcee}
 "use strict";
 var VF=Vex.Flow;
 var scene,camera,renderer,clock=new THREE.Clock();
-var walls=[];
-var CS=5.5, R=3, C=4, ROOM_HALF=3;
-var entranceCol=Math.floor(C/2);
-var grid=[];
-var theta=0, pos=new THREE.Vector3(0,1.6,1.5);
+var walls=[]; // collision AABBs {minX,maxX,minZ,maxZ,mesh?}
+var CS=5.5, R=4, C=5, ROOM_HALF=3; // slightly larger, fully connected maze
+var entranceCol=Math.floor(C/2); // center column opens into start room
+var maze=[]; // maze[x][z] = {walls:[N,E,S,W]}  — same style as liminal game
+var theta=0, pos=new THREE.Vector3(0,1.6,1.2);
 var keys={};
 var enemies=[], boss=null, bossLight=null, defeated=0, bossActive=false, bossDoor=null, bossDoorCell=null;
 var redDoor, redDoorOpen=false, redDoorMesh=null;
 var frozen=true;
 var raycaster=new THREE.Raycaster(), mouseNDC=new THREE.Vector2();
 var hoverDoor=null;
-var worldMinX=-8, worldMaxX=8, worldMinZ=-30, worldMaxZ=6;
+var worldMinX=-10, worldMaxX=10, worldMinZ=-40, worldMaxZ=6;
 
 var FLOOR_COL=0x6b3fa0, WALL_COL=0x3a6ad8, CEIL_COL=0x9ec8f0;
 
@@ -82,32 +82,80 @@ var FREQ={C4:261.63,'C#4':277.18,D4:293.66,'D#4':311.13,E4:329.63,F4:349.23,'F#4
 
 // ---------- three ----------
 function initThree(){
-  scene=new THREE.Scene(); scene.background=new THREE.Color(CEIL_COL); scene.fog=new THREE.Fog(CEIL_COL,10,45);
+  scene=new THREE.Scene(); scene.background=new THREE.Color(CEIL_COL); scene.fog=new THREE.Fog(CEIL_COL,12,50);
   camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,0.1,200);
   camera.rotation.order='YXZ';
   renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true}); renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   scene.add(new THREE.AmbientLight(0xaabbdd,.85));
-  var pl=new THREE.PointLight(0xffe9c0,.7,40); pl.position.set(0,4,0); scene.add(pl);
+  var pl=new THREE.PointLight(0xffe9c0,.7,45); pl.position.set(0,4,0); scene.add(pl);
   window.addEventListener('resize',function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
 
 function addWall(x0,z0,x1,z1){
-  var len=Math.hypot(x1-x0,z1-z0), H=4, T=.35;
-  if(len<0.01) return null;
+  var len=Math.hypot(x1-x0,z1-z0), H=4, T=.3;
+  if(len<0.05) return null;
   var m=new THREE.Mesh(new THREE.BoxGeometry(len+T,H,T),new THREE.MeshStandardMaterial({color:WALL_COL,roughness:.85}));
   m.position.set((x0+x1)/2,H/2,(z0+z1)/2);
   m.rotation.y=Math.atan2(z1-z0,x1-x0);
   scene.add(m);
-  var hx=(len+T)/2, hz=T/2+.05, cos=Math.cos(m.rotation.y), sin=Math.sin(m.rotation.y);
+  var hx=(len+T)/2, hz=T/2+.04, cos=Math.cos(m.rotation.y), sin=Math.sin(m.rotation.y);
   var ax=Math.abs(cos)*hx+Math.abs(sin)*hz, az=Math.abs(sin)*hx+Math.abs(cos)*hz;
   var wallObj={minX:m.position.x-ax,maxX:m.position.x+ax,minZ:m.position.z-az,maxZ:m.position.z+az,mesh:m};
   walls.push(wallObj);
   return wallObj;
 }
 
+// World X of column j (0..C-1), centered so entranceCol is at x=0
 function cellX(j){ return (j - entranceCol) * CS; }
-// Row 0 sits just north of the start-room doorway so the player walks straight in
-function cellZ(i){ return -ROOM_HALF - CS/2 - i * CS; }
+// World Z of row i (0 = closest to start room, increases deeper into maze → more negative Z)
+function cellZ(i){ return -ROOM_HALF - CS * (i + 0.5); }
+
+// ---------- LIMINAL-STYLE MAZE GENERATION ----------
+// walls: [0=N, 1=E, 2=S, 3=W]  — true = wall present
+function generateMaze(){
+  maze = [];
+  for(var x=0; x<C; x++){
+    maze[x] = [];
+    for(var z=0; z<R; z++){
+      maze[x][z] = { visited:false, walls:[true,true,true,true] };
+    }
+  }
+  var stack = [];
+  // Start carving from the entrance cell so a path always reaches the door
+  var current = { x:entranceCol, z:0 };
+  maze[entranceCol][0].visited = true;
+
+  while(true){
+    var neighbors = [];
+    var cx=current.x, cz=current.z;
+    // N (z-1) — deeper into maze is +z in grid, but we map z-index increasing → more negative world Z
+    // Grid z=0 is south (toward start room); grid z increases northward (deeper)
+    if(cz > 0 && !maze[cx][cz-1].visited)
+      neighbors.push({ x:cx, z:cz-1, wall:0, neighborWall:2 }); // open N of current, S of neighbor
+    if(cx < C-1 && !maze[cx+1][cz].visited)
+      neighbors.push({ x:cx+1, z:cz, wall:1, neighborWall:3 });
+    if(cz < R-1 && !maze[cx][cz+1].visited)
+      neighbors.push({ x:cx, z:cz+1, wall:2, neighborWall:0 });
+    if(cx > 0 && !maze[cx-1][cz].visited)
+      neighbors.push({ x:cx-1, z:cz, wall:3, neighborWall:1 });
+
+    if(neighbors.length > 0){
+      var next = neighbors[Math.floor(Math.random()*neighbors.length)];
+      maze[current.x][current.z].walls[next.wall] = false;
+      maze[next.x][next.z].walls[next.neighborWall] = false;
+      maze[next.x][next.z].visited = true;
+      stack.push(current);
+      current = { x:next.x, z:next.z };
+    } else if(stack.length > 0){
+      current = stack.pop();
+    } else {
+      break;
+    }
+  }
+
+  // Open the SOUTH wall of the entrance cell so it joins the start-room doorway
+  maze[entranceCol][0].walls[2] = false;
+}
 
 function buildRoom(){
   var g=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
@@ -115,84 +163,73 @@ function buildRoom(){
   var ceil=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
   ceil.rotation.x=Math.PI/2; ceil.position.y=4.05; scene.add(ceil);
 
-  var half=ROOM_HALF, dh=1.15;
-  // start-room walls (gap on north for red door)
-  addWall(-half,-half,-dh,-half);
-  addWall(dh,-half,half,-half);
-  addWall(-half,half,half,half);
-  addWall(-half,-half,-half,half);
-  addWall(half,-half,half,half);
+  var half=ROOM_HALF, dh=1.2;
+  // Start room: gap on north for red door
+  addWall(-half, half, half, half);          // south
+  addWall(-half,-half,-half, half);          // west
+  addWall( half,-half, half, half);          // east
+  addWall(-half,-half, -dh,-half);           // north left of door
+  addWall(  dh,-half, half,-half);           // north right of door
 
   var doorMat=new THREE.MeshStandardMaterial({color:0xb5271f,emissive:0x220000,emissiveIntensity:.4,roughness:.5});
-  redDoorMesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
+  redDoorMesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.28),doorMat);
   redDoorMesh.position.set(0,1.7,-half);
   scene.add(redDoorMesh);
-  var doorWall={minX:-dh,maxX:dh,minZ:-half-.2,maxZ:-half+.2};
+  var doorWall={minX:-dh,maxX:dh,minZ:-half-.15,maxZ:-half+.15};
   walls.push(doorWall);
   redDoor={mesh:redDoorMesh,mat:doorMat,wallObj:doorWall};
-}
-
-function genMaze(){
-  // Perfect maze via recursive backtracker — every cell is reachable from every other
-  for(var i=0;i<R;i++){ grid[i]=[]; for(var j=0;j<C;j++) grid[i][j]={N:true,S:true,E:true,W:true,v:false}; }
-  var stack=[[0,entranceCol]]; grid[0][entranceCol].v=true;
-  while(stack.length){
-    var cur=stack[stack.length-1], i=cur[0], j=cur[1];
-    var nbrs=[];
-    if(i>0&&!grid[i-1][j].v) nbrs.push(['N',i-1,j]);
-    if(i<R-1&&!grid[i+1][j].v) nbrs.push(['S',i+1,j]);
-    if(j>0&&!grid[i][j-1].v) nbrs.push(['W',i,j-1]);
-    if(j<C-1&&!grid[i][j+1].v) nbrs.push(['E',i,j+1]);
-    if(!nbrs.length){ stack.pop(); continue; }
-    var pick=nbrs[Math.floor(Math.random()*nbrs.length)];
-    var dir=pick[0],ni=pick[1],nj=pick[2];
-    if(dir==='N'){grid[i][j].N=false;grid[ni][nj].S=false;}
-    if(dir==='S'){grid[i][j].S=false;grid[ni][nj].N=false;}
-    if(dir==='W'){grid[i][j].W=false;grid[ni][nj].E=false;}
-    if(dir==='E'){grid[i][j].E=false;grid[ni][nj].W=false;}
-    grid[ni][nj].v=true; stack.push([ni,nj]);
-  }
-  // Explicit entrance: open the SOUTH side of the entrance cell so it joins the start room
-  grid[0][entranceCol].S=false;
 }
 
 function buildMazeMesh(){
   var half=CS/2;
 
-  // Floor & ceiling covering start room + maze
-  var floorW=C*CS+6, floorD=R*CS+ROOM_HALF*2+4;
+  // Floor & ceiling over maze area
+  var floorW=C*CS+4, floorD=R*CS+ROOM_HALF+4;
   var g=new THREE.Mesh(new THREE.PlaneGeometry(floorW,floorD),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
-  g.rotation.x=-Math.PI/2; g.position.set(0,-0.001,cellZ(R/2)); scene.add(g);
+  g.rotation.x=-Math.PI/2;
+  g.position.set(0,-0.002, (cellZ(0)+cellZ(R-1))/2 );
+  scene.add(g);
   var ceil=new THREE.Mesh(new THREE.PlaneGeometry(floorW,floorD),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
-  ceil.rotation.x=Math.PI/2; ceil.position.set(0,4.05,cellZ(R/2)); scene.add(ceil);
+  ceil.rotation.x=Math.PI/2; ceil.position.set(0,4.05, (cellZ(0)+cellZ(R-1))/2 );
+  scene.add(ceil);
 
-  // Internal maze walls
-  for(var i=0;i<R;i++) for(var j=0;j<C;j++){
-    var cx=cellX(j), cz=cellZ(i);
-    var cell=grid[i][j];
-    // North wall of cell
-    if(cell.N) addWall(cx-half,cz-half,cx+half,cz-half);
-    // South wall — skip for entrance cell (connects to start room)
-    if(cell.S && !(i===0 && j===entranceCol)) addWall(cx-half,cz+half,cx+half,cz+half);
-    if(cell.W) addWall(cx-half,cz-half,cx-half,cz+half);
-    if(cell.E) addWall(cx+half,cz-half,cx+half,cz+half);
+  // Place walls from cell flags (same idea as liminal game)
+  // Draw each wall only once: N and W from every cell; plus S on last row, E on last col
+  for(var x=0; x<C; x++){
+    for(var z=0; z<R; z++){
+      var cell=maze[x][z];
+      var cx=cellX(x), cz=cellZ(z);
+      // North wall (toward more negative world Z = deeper)
+      // In grid: wall[0]=N means the side toward z-1 (smaller z index = toward start = +world Z)
+      // Mapping: grid z increases → world Z decreases.
+      // So grid "North" (toward z-1, start room) is actually +world-Z = SOUTH of the cell in world space.
+      // To avoid confusion we place by world edges of the cell:
+      //   world-south edge of cell = cz + half  (toward start room)
+      //   world-north edge of cell = cz - half  (deeper into maze)
+
+      // walls[2] = S in grid terms = toward higher grid-z? 
+      // Our generation: wall 0 opened when going to z-1 (lower index).
+      // wall 0 = side facing z-1 = toward start room = world-south side of cell.
+      // wall 2 = side facing z+1 = deeper = world-north side of cell.
+
+      if(cell.walls[0]){ // toward start room (world +Z / south face)
+        // skip entrance opening
+        if(!(x===entranceCol && z===0))
+          addWall(cx-half, cz+half, cx+half, cz+half);
+      }
+      if(cell.walls[2]){ // deeper (world -Z / north face)
+        addWall(cx-half, cz-half, cx+half, cz-half);
+      }
+      if(cell.walls[3]){ // west
+        addWall(cx-half, cz-half, cx-half, cz+half);
+      }
+      if(cell.walls[1]){ // east
+        addWall(cx+half, cz-half, cx+half, cz+half);
+      }
+    }
   }
 
-  // Outer boundary walls of the whole maze (guaranteed closed perimeter)
-  var left=cellX(0)-half, right=cellX(C-1)+half;
-  var top=cellZ(R-1)-half;          // most negative Z
-  var bottom=cellZ(0)+half;         // closest to start room
-  // North outer
-  addWall(left,top,right,top);
-  // South outer — leave gap at entrance column so start-room door connects
-  var entL=cellX(entranceCol)-1.15, entR=cellX(entranceCol)+1.15;
-  addWall(left,bottom,entL,bottom);
-  addWall(entR,bottom,right,bottom);
-  // West & east outer
-  addWall(left,top,left,bottom);
-  addWall(right,top,right,bottom);
-
-  // World bounds from walls (minimap + player clamp)
+  // World bounds from all walls + start room
   worldMinX=Infinity; worldMaxX=-Infinity; worldMinZ=Infinity; worldMaxZ=-Infinity;
   walls.forEach(function(w){
     worldMinX=Math.min(worldMinX,w.minX);
@@ -200,18 +237,18 @@ function buildMazeMesh(){
     worldMinZ=Math.min(worldMinZ,w.minZ);
     worldMaxZ=Math.max(worldMaxZ,w.maxZ);
   });
-  // Include start room in bounds
-  worldMinX=Math.min(worldMinX,-ROOM_HALF-0.5);
-  worldMaxX=Math.max(worldMaxX,ROOM_HALF+0.5);
-  worldMaxZ=Math.max(worldMaxZ,ROOM_HALF+0.5);
-  var pad=0.35;
+  worldMinX=Math.min(worldMinX,-ROOM_HALF-0.4);
+  worldMaxX=Math.max(worldMaxX, ROOM_HALF+0.4);
+  worldMaxZ=Math.max(worldMaxZ, ROOM_HALF+0.4);
+  var pad=0.3;
   worldMinX-=pad; worldMaxX+=pad; worldMinZ-=pad; worldMaxZ+=pad;
 }
 
 // ---------- collision ----------
 function tryMove(nx,nz,rad){
   rad=rad||.32;
-  for(var k=0;k<walls.length;k++){ var w=walls[k];
+  for(var k=0;k<walls.length;k++){
+    var w=walls[k];
     var cx=Math.max(w.minX,Math.min(nx,w.maxX));
     var cz=Math.max(w.minZ,Math.min(nz,w.maxZ));
     var dx=nx-cx, dz=nz-cz;
@@ -240,47 +277,50 @@ function makeSphere(radius,color){
 }
 function randFarCell(){
   var tries=0;
-  while(tries++<50){
-    var i=Math.floor(Math.random()*R);
-    var j=Math.floor(Math.random()*C);
-    // keep away from entrance cell
-    if(i===0 && Math.abs(j-entranceCol)<=1) continue;
-    return [i,j];
+  while(tries++<60){
+    var x=Math.floor(Math.random()*C);
+    var z=Math.floor(Math.random()*R);
+    if(z===0 && Math.abs(x-entranceCol)<=1) continue; // not next to entrance
+    return [x,z];
   }
-  return [R-1, C-1];
+  return [C-1, R-1];
 }
 function spawnEnemies(){
   for(var k=0;k<8;k++){
     var rc=randFarCell();
     var s=makeSphere(.5,0xdd2020);
-    s.position.set(cellX(rc[1])+(Math.random()-.5)*1.5,1.4,cellZ(rc[0])+(Math.random()-.5)*1.5);
+    s.position.set(cellX(rc[0])+(Math.random()-.5)*1.4, 1.4, cellZ(rc[1])+(Math.random()-.5)*1.4);
     enemies.push({mesh:s,alive:true,wanderT:new THREE.Vector3().copy(s.position),chase:false,dead:false});
   }
 }
 function pickFarCell(){
-  var best=[R-1,0],bd=-1;
-  for(var i=0;i<R;i++) for(var j=0;j<C;j++){
-    var d=i*i+Math.pow(j-entranceCol,2);
-    if(d>bd){bd=d;best=[i,j];}
+  var best=[0,R-1], bd=-1;
+  for(var x=0;x<C;x++) for(var z=0;z<R;z++){
+    var d=z*z + Math.pow(x-entranceCol,2);
+    if(d>bd){ bd=d; best=[x,z]; }
   }
   return best;
 }
 function spawnBoss(){
   bossDoorCell=pickFarCell();
-  var i=bossDoorCell[0],j=bossDoorCell[1],half=CS/2,cx=cellX(j),cz=cellZ(i),dh=1.15;
-  // open the north face of that cell for the yellow door
+  var x=bossDoorCell[0], z=bossDoorCell[1];
+  var half=CS/2, cx=cellX(x), cz=cellZ(z), dh=1.15;
+  // Remove wall on the deep (north) side of that cell and put yellow door there
   for(var w=walls.length-1;w>=0;w--){
     var wl=walls[w];
     var cxw=(wl.minX+wl.maxX)/2, czw=(wl.minZ+wl.maxZ)/2;
-    if(Math.abs(cxw-cx)<half+.3 && Math.abs(czw-(cz-half))<.6){ if(wl.mesh) scene.remove(wl.mesh); walls.splice(w,1); }
+    if(Math.abs(cxw-cx)<half+.3 && Math.abs(czw-(cz-half))<.55){
+      if(wl.mesh) scene.remove(wl.mesh);
+      walls.splice(w,1);
+    }
   }
   var doorMat=new THREE.MeshStandardMaterial({color:0xd8b41a,emissive:0x332200,emissiveIntensity:.4,roughness:.5});
-  var dmesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
+  var dmesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.28),doorMat);
   dmesh.position.set(cx,1.7,cz-half);
   scene.add(dmesh);
-  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz-half-.2,maxZ:cz-half+.2};
+  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz-half-.15,maxZ:cz-half+.15};
   walls.push(doorWall);
-  bossDoor={mesh:dmesh,mat:doorMat,open:false,cell:[i,j],wallObj:doorWall};
+  bossDoor={mesh:dmesh,mat:doorMat,open:false,cell:[x,z],wallObj:doorWall};
   boss=makeSphere(1.5,0xff1414);
   boss.material.emissiveIntensity=1;
   boss.position.set(cx,2,cz);
@@ -354,7 +394,7 @@ function updateEnemies(dt){
     } else {
       e.mesh.material.emissive.setHex(0xdd2020);
       var dir2=new THREE.Vector3().subVectors(e.wanderT,e.mesh.position); dir2.y=0;
-      if(dir2.length()<.3){ var rc=randFarCell(); e.wanderT.set(cellX(rc[1]),1.4,cellZ(rc[0])); }
+      if(dir2.length()<.3){ var rc=randFarCell(); e.wanderT.set(cellX(rc[0]),1.4,cellZ(rc[1])); }
       else { dir2.normalize(); var nx2=e.mesh.position.x+dir2.x*1*dt, nz2=e.mesh.position.z+dir2.z*1*dt; if(tryMove(nx2,e.mesh.position.z,.4)) e.mesh.position.x=nx2; if(tryMove(e.mesh.position.x,nz2,.4)) e.mesh.position.z=nz2; }
     }
     if(d<1.3 && !noteGame.active && hasLineOfSight(e.mesh.position.x,e.mesh.position.z,pos.x,pos.z)){
@@ -640,7 +680,11 @@ document.getElementById('startBtn').addEventListener('click',function(){
   document.getElementById('crosshair').classList.remove('hidden');
   document.getElementById('minimap').classList.remove('hidden');
   setLife(100);
-  initThree(); buildRoom(); genMaze(); buildMazeMesh(); spawnEnemies();
+  initThree();
+  buildRoom();
+  generateMaze();   // liminal-style recursive backtracker
+  buildMazeMesh();
+  spawnEnemies();
   camera.position.copy(pos); camera.rotation.set(0,theta,0);
   frozen=false;
   requestLook();
