@@ -21,6 +21,7 @@ button:hover{background:#59bcee}
 #centertext{position:fixed;top:14%;left:0;right:0;text-align:center;font-size:1.6rem;z-index:9;text-shadow:0 2px 8px #000;transition:opacity 1s;pointer-events:none}
 #flash{position:fixed;inset:0;pointer-events:none;z-index:8;opacity:0;transition:opacity .12s}
 #crosshair{position:fixed;top:50%;left:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:#fff;opacity:.85;z-index:11;pointer-events:none}
+#minimap{position:fixed;left:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));border:2px solid #6a8dff;border-radius:8px;background:#0a0a16;z-index:10}
 #notegame{position:fixed;inset:0;z-index:15;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;background:rgba(0,0,0,.35)}
 #timerwrap{position:absolute;top:24px;right:24px}
 #staffbox{background:rgba(15,12,10,.85);border-radius:14px;padding:14px;margin-bottom:8px}
@@ -30,19 +31,18 @@ button:hover{background:#59bcee}
 .pkey.w{background:linear-gradient(180deg,#fdf9ee,#e8e0cc);border:1px solid #998;z-index:1;height:130px}
 .pkey.b{background:linear-gradient(180deg,#222,#000);border:1px solid #000;z-index:2;height:82px}
 .pkey:active{filter:brightness(.85)}
-#minimap{position:fixed;bottom:18px;left:18px;width:140px;height:140px;background:rgba(10,8,20,.75);border:2px solid #6a8cff;border-radius:10px;z-index:12;pointer-events:none}
 </style></head>
 <body>
 <canvas id="c"></canvas>
 <div id="flash"></div>
 <div id="hud" class="hidden"><div id="lifewrap"><div id="lifebar"></div></div><div id="lifelabel">Life 100/100</div></div>
 <div id="crosshair" class="hidden"></div>
+<canvas id="minimap" width="150" height="150" class="hidden"></canvas>
 <div id="centertext"></div>
-<canvas id="minimap" class="hidden" width="140" height="140"></canvas>
 
 <div id="home" class="screen"><h1>Maze of Notes</h1><p>Navigate a maze, read the staff, defeat every foe.</p><button id="startBtn">Start</button></div>
 <div id="gameover" class="screen hidden"><h1>Game Over</h1><button id="homeBtn2">Return Home</button></div>
-<div id="levelcomplete" class="screen hidden"><h1>Level One Complete</h1></div>
+<div id="levelcomplete" class="screen hidden"><h1>Level 1 Complete</h1></div>
 
 <div id="notegame" class="hidden">
   <svg id="timerwrap" width="70" height="70"><circle cx="35" cy="35" r="30" stroke="#333" stroke-width="6" fill="none"/><circle id="timerring" cx="35" cy="35" r="30" stroke="#3fa9dc" stroke-width="6" fill="none" stroke-dasharray="188" stroke-dashoffset="0" transform="rotate(-90 35 35)"/></svg>
@@ -55,20 +55,17 @@ button:hover{background:#59bcee}
 "use strict";
 var VF=Vex.Flow;
 var scene,camera,renderer,clock=new THREE.Clock();
-var walls=[]; // collision AABBs {minX,maxX,minZ,maxZ,mesh?}
-var CS=5.5, R=4, C=5, ROOM_HALF=3; // slightly larger, fully connected maze
-var entranceCol=Math.floor(C/2); // center column opens into start room
-var maze=[]; // maze[x][z] = {walls:[N,E,S,W]}  — same style as liminal game
-var theta=0, pos=new THREE.Vector3(0,1.6,1.2);
+var walls=[]; // {minX,maxX,minZ,maxZ}
+var CS=4, R=3, C=4, ROOMZ=4; // maze rows/cols, cell size — kept small for young players
+var entranceCol=Math.floor(C/2);
+var grid=[];
+var theta=0, pos=new THREE.Vector3(0,1.6,2);
 var keys={};
 var enemies=[], boss=null, bossLight=null, defeated=0, bossActive=false, bossDoor=null, bossDoorCell=null;
 var redDoor, redDoorOpen=false, redDoorMesh=null;
-var frozen=true;
+var frozen=true; // frozen until game starts / during note games
 var raycaster=new THREE.Raycaster(), mouseNDC=new THREE.Vector2();
 var hoverDoor=null;
-var worldMinX=-10, worldMaxX=10, worldMinZ=-40, worldMaxZ=6;
-
-var FLOOR_COL=0x6b3fa0, WALL_COL=0x3a6ad8, CEIL_COL=0x9ec8f0;
 
 // ---------- audio ----------
 var actx=null;
@@ -76,198 +73,103 @@ function ac(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContex
 function tone(freq,dur,type){ var a=ac(); var o=a.createOscillator(),g=a.createGain(); o.type=type||'sine'; o.frequency.setValueAtTime(freq,a.currentTime); g.gain.setValueAtTime(.22,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+dur); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur); }
 function sfxWrong(){ var a=ac(),o=a.createOscillator(),g=a.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(500,a.currentTime); o.frequency.exponentialRampToValueAtTime(120,a.currentTime+.6); g.gain.setValueAtTime(.18,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+.6); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+.6); }
 function sfxWin(){ [523.25,659.25,783.99,1046.5].forEach(function(f,i){ setTimeout(function(){tone(f,.35,'triangle');},i*90); }); }
-function sfxHappyDoor(){ [392,523.25,659.25,783.99,1046.5].forEach(function(f,i){ setTimeout(function(){tone(f,.28,'triangle');},i*70); }); }
+function sfxExplosion(){
+  var a=ac(); var len=a.sampleRate*.5;
+  var buf=a.createBuffer(1,len,a.sampleRate), data=buf.getChannelData(0);
+  for(var i=0;i<len;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);
+  var noise=a.createBufferSource(); noise.buffer=buf;
+  var filt=a.createBiquadFilter(); filt.type='lowpass'; filt.frequency.setValueAtTime(1400,a.currentTime); filt.frequency.exponentialRampToValueAtTime(70,a.currentTime+.5);
+  var g=a.createGain(); g.gain.setValueAtTime(.5,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+.5);
+  noise.connect(filt); filt.connect(g); g.connect(a.destination);
+  noise.start(); noise.stop(a.currentTime+.5);
+}
 
 var FREQ={C4:261.63,'C#4':277.18,D4:293.66,'D#4':311.13,E4:329.63,F4:349.23,'F#4':369.99,G4:392,'G#4':415.3,A4:440,'A#4':466.16,B4:493.88,C5:523.25,'C#5':554.37,D5:587.33,'D#5':622.25,E5:659.25,F5:698.46,'F#5':739.99,G5:783.99};
 
-// ---------- three ----------
+// ---------- three setup ----------
 function initThree(){
-  scene=new THREE.Scene(); scene.background=new THREE.Color(CEIL_COL); scene.fog=new THREE.Fog(CEIL_COL,12,50);
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x060606); scene.fog=new THREE.Fog(0x060606,4,34);
   camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,0.1,200);
   camera.rotation.order='YXZ';
   renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true}); renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-  scene.add(new THREE.AmbientLight(0xaabbdd,.85));
-  var pl=new THREE.PointLight(0xffe9c0,.7,45); pl.position.set(0,4,0); scene.add(pl);
+  scene.add(new THREE.AmbientLight(0x556677,.7));
+  var pl=new THREE.PointLight(0xffe9c0,.9,40); pl.position.set(0,4,0); scene.add(pl);
   window.addEventListener('resize',function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
 
 function addWall(x0,z0,x1,z1){
   var len=Math.hypot(x1-x0,z1-z0), H=4, T=.3;
-  if(len<0.05) return null;
-  var m=new THREE.Mesh(new THREE.BoxGeometry(len+T,H,T),new THREE.MeshStandardMaterial({color:WALL_COL,roughness:.85}));
+  var m=new THREE.Mesh(new THREE.BoxGeometry(len+T,H,T),new THREE.MeshStandardMaterial({color:0x3a63c9,roughness:.85}));
   m.position.set((x0+x1)/2,H/2,(z0+z1)/2);
   m.rotation.y=Math.atan2(z1-z0,x1-x0);
   scene.add(m);
-  var hx=(len+T)/2, hz=T/2+.04, cos=Math.cos(m.rotation.y), sin=Math.sin(m.rotation.y);
+  var hx=(len+T)/2, hz=T/2+.05, cos=Math.cos(m.rotation.y), sin=Math.sin(m.rotation.y);
   var ax=Math.abs(cos)*hx+Math.abs(sin)*hz, az=Math.abs(sin)*hx+Math.abs(cos)*hz;
   var wallObj={minX:m.position.x-ax,maxX:m.position.x+ax,minZ:m.position.z-az,maxZ:m.position.z+az,mesh:m};
   walls.push(wallObj);
   return wallObj;
 }
 
-// World X of column j (0..C-1), centered so entranceCol is at x=0
-function cellX(j){ return (j - entranceCol) * CS; }
-// World Z of row i (0 = closest to start room, increases deeper into maze → more negative Z)
-function cellZ(i){ return -ROOM_HALF - CS * (i + 0.5); }
-
-// ---------- LIMINAL-STYLE MAZE GENERATION ----------
-// walls: [0=N, 1=E, 2=S, 3=W]  — true = wall present
-function generateMaze(){
-  maze = [];
-  for(var x=0; x<C; x++){
-    maze[x] = [];
-    for(var z=0; z<R; z++){
-      maze[x][z] = { visited:false, walls:[true,true,true,true] };
-    }
-  }
-  var stack = [];
-  // Start carving from the entrance cell so a path always reaches the door
-  var current = { x:entranceCol, z:0 };
-  maze[entranceCol][0].visited = true;
-
-  while(true){
-    var neighbors = [];
-    var cx=current.x, cz=current.z;
-    // N (z-1) — deeper into maze is +z in grid, but we map z-index increasing → more negative world Z
-    // Grid z=0 is south (toward start room); grid z increases northward (deeper)
-    if(cz > 0 && !maze[cx][cz-1].visited)
-      neighbors.push({ x:cx, z:cz-1, wall:0, neighborWall:2 }); // open N of current, S of neighbor
-    if(cx < C-1 && !maze[cx+1][cz].visited)
-      neighbors.push({ x:cx+1, z:cz, wall:1, neighborWall:3 });
-    if(cz < R-1 && !maze[cx][cz+1].visited)
-      neighbors.push({ x:cx, z:cz+1, wall:2, neighborWall:0 });
-    if(cx > 0 && !maze[cx-1][cz].visited)
-      neighbors.push({ x:cx-1, z:cz, wall:3, neighborWall:1 });
-
-    if(neighbors.length > 0){
-      var next = neighbors[Math.floor(Math.random()*neighbors.length)];
-      maze[current.x][current.z].walls[next.wall] = false;
-      maze[next.x][next.z].walls[next.neighborWall] = false;
-      maze[next.x][next.z].visited = true;
-      stack.push(current);
-      current = { x:next.x, z:next.z };
-    } else if(stack.length > 0){
-      current = stack.pop();
-    } else {
-      break;
-    }
-  }
-
-  // Open the SOUTH wall of the entrance cell so it joins the start-room doorway
-  maze[entranceCol][0].walls[2] = false;
-}
-
 function buildRoom(){
-  var g=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
+  var g=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0x6a3fc9}));
   g.rotation.x=-Math.PI/2; scene.add(g);
-  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
-  ceil.rotation.x=Math.PI/2; ceil.position.y=4.05; scene.add(ceil);
-
-  var half=ROOM_HALF, dh=1.2;
-  // Start room: gap on north for red door
-  addWall(-half, half, half, half);          // south
-  addWall(-half,-half,-half, half);          // west
-  addWall( half,-half, half, half);          // east
-  addWall(-half,-half, -dh,-half);           // north left of door
-  addWall(  dh,-half, half,-half);           // north right of door
-
+  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0xaee3ff}));
+  ceil.rotation.x=Math.PI/2; ceil.position.y=4; scene.add(ceil);
+  var half=3, dh=1.15;
+  addWall(-half,-half,-dh,-half); // north-left of doorway
+  addWall(dh,-half,half,-half); // north-right of doorway
+  addWall(-half,half,half,half); // south
+  addWall(-half,-half,-half,half); // west
+  addWall(half,-half,half,half); // east
+  // red door fills the north doorway gap
   var doorMat=new THREE.MeshStandardMaterial({color:0xb5271f,emissive:0x220000,emissiveIntensity:.4,roughness:.5});
-  redDoorMesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.28),doorMat);
+  redDoorMesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
   redDoorMesh.position.set(0,1.7,-half);
   scene.add(redDoorMesh);
-  var doorWall={minX:-dh,maxX:dh,minZ:-half-.15,maxZ:-half+.15};
+  var doorWall={minX:-dh,maxX:dh,minZ:-half-.2,maxZ:-half+.2};
   walls.push(doorWall);
   redDoor={mesh:redDoorMesh,mat:doorMat,wallObj:doorWall};
 }
 
+function genMaze(){
+  for(var i=0;i<R;i++){ grid[i]=[]; for(var j=0;j<C;j++) grid[i][j]={N:true,S:true,E:true,W:true,v:false}; }
+  var stack=[[0,entranceCol]]; grid[0][entranceCol].v=true;
+  while(stack.length){
+    var cur=stack[stack.length-1], i=cur[0], j=cur[1];
+    var nbrs=[];
+    if(i>0&&!grid[i-1][j].v) nbrs.push(['N',i-1,j]);
+    if(i<R-1&&!grid[i+1][j].v) nbrs.push(['S',i+1,j]);
+    if(j>0&&!grid[i][j-1].v) nbrs.push(['W',i,j-1]);
+    if(j<C-1&&!grid[i][j+1].v) nbrs.push(['E',i,j+1]);
+    if(!nbrs.length){ stack.pop(); continue; }
+    var pick=nbrs[Math.floor(Math.random()*nbrs.length)];
+    var dir=pick[0],ni=pick[1],nj=pick[2];
+    if(dir==='N'){grid[i][j].N=false;grid[ni][nj].S=false;}
+    if(dir==='S'){grid[i][j].S=false;grid[ni][nj].N=false;}
+    if(dir==='W'){grid[i][j].W=false;grid[ni][nj].E=false;}
+    if(dir==='E'){grid[i][j].E=false;grid[ni][nj].W=false;}
+    grid[ni][nj].v=true; stack.push([ni,nj]);
+  }
+}
+
+function cellX(j){ return (j-entranceCol)*CS; }
+function cellZ(i){ return -ROOMZ-3-i*CS; }
+
 function buildMazeMesh(){
   var half=CS/2;
-
-  // Floor & ceiling over maze area
-  var floorW=C*CS+4, floorD=R*CS+ROOM_HALF+4;
-  var g=new THREE.Mesh(new THREE.PlaneGeometry(floorW,floorD),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
-  g.rotation.x=-Math.PI/2;
-  g.position.set(0,-0.002, (cellZ(0)+cellZ(R-1))/2 );
-  scene.add(g);
-  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(floorW,floorD),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
-  ceil.rotation.x=Math.PI/2; ceil.position.set(0,4.05, (cellZ(0)+cellZ(R-1))/2 );
-  scene.add(ceil);
-
-  // Place walls from cell flags (same idea as liminal game)
-  // Draw each wall only once: N and W from every cell; plus S on last row, E on last col
-  for(var x=0; x<C; x++){
-    for(var z=0; z<R; z++){
-      var cell=maze[x][z];
-      var cx=cellX(x), cz=cellZ(z);
-      // North wall (toward more negative world Z = deeper)
-      // In grid: wall[0]=N means the side toward z-1 (smaller z index = toward start = +world Z)
-      // Mapping: grid z increases → world Z decreases.
-      // So grid "North" (toward z-1, start room) is actually +world-Z = SOUTH of the cell in world space.
-      // To avoid confusion we place by world edges of the cell:
-      //   world-south edge of cell = cz + half  (toward start room)
-      //   world-north edge of cell = cz - half  (deeper into maze)
-
-      // walls[2] = S in grid terms = toward higher grid-z? 
-      // Our generation: wall 0 opened when going to z-1 (lower index).
-      // wall 0 = side facing z-1 = toward start room = world-south side of cell.
-      // wall 2 = side facing z+1 = deeper = world-north side of cell.
-
-      if(cell.walls[0]){ // toward start room (world +Z / south face)
-        // skip entrance opening
-        if(!(x===entranceCol && z===0))
-          addWall(cx-half, cz+half, cx+half, cz+half);
-      }
-      if(cell.walls[2]){ // deeper (world -Z / north face)
-        addWall(cx-half, cz-half, cx+half, cz-half);
-      }
-      if(cell.walls[3]){ // west
-        addWall(cx-half, cz-half, cx-half, cz+half);
-      }
-      if(cell.walls[1]){ // east
-        addWall(cx+half, cz-half, cx+half, cz+half);
-      }
-    }
+  var g=new THREE.Mesh(new THREE.PlaneGeometry(C*CS+4,R*CS+ROOMZ+8),new THREE.MeshStandardMaterial({color:0x6a3fc9}));
+  g.rotation.x=-Math.PI/2; g.position.set(0,-0.001,cellZ(R/2)); scene.add(g);
+  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(C*CS+4,R*CS+ROOMZ+8),new THREE.MeshStandardMaterial({color:0xaee3ff}));
+  ceil.rotation.x=Math.PI/2; ceil.position.set(0,4,cellZ(R/2)); scene.add(ceil);
+  computeMapBounds();
+  for(var i=0;i<R;i++) for(var j=0;j<C;j++){
+    var cx=cellX(j), cz=cellZ(i);
+    var cell=grid[i][j];
+    if(cell.N && !(i===0 && j===entranceCol)) addWall(cx-half,cz-half,cx+half,cz-half);
+    if(cell.S) addWall(cx-half,cz+half,cx+half,cz+half);
+    if(cell.W) addWall(cx-half,cz-half,cx-half,cz+half);
+    if(cell.E) addWall(cx+half,cz-half,cx+half,cz+half);
   }
-
-  // World bounds from all walls + start room
-  worldMinX=Infinity; worldMaxX=-Infinity; worldMinZ=Infinity; worldMaxZ=-Infinity;
-  walls.forEach(function(w){
-    worldMinX=Math.min(worldMinX,w.minX);
-    worldMaxX=Math.max(worldMaxX,w.maxX);
-    worldMinZ=Math.min(worldMinZ,w.minZ);
-    worldMaxZ=Math.max(worldMaxZ,w.maxZ);
-  });
-  worldMinX=Math.min(worldMinX,-ROOM_HALF-0.4);
-  worldMaxX=Math.max(worldMaxX, ROOM_HALF+0.4);
-  worldMaxZ=Math.max(worldMaxZ, ROOM_HALF+0.4);
-  var pad=0.3;
-  worldMinX-=pad; worldMaxX+=pad; worldMinZ-=pad; worldMaxZ+=pad;
-}
-
-// ---------- collision ----------
-function tryMove(nx,nz,rad){
-  rad=rad||.32;
-  for(var k=0;k<walls.length;k++){
-    var w=walls[k];
-    var cx=Math.max(w.minX,Math.min(nx,w.maxX));
-    var cz=Math.max(w.minZ,Math.min(nz,w.maxZ));
-    var dx=nx-cx, dz=nz-cz;
-    if(dx*dx+dz*dz<rad*rad) return false;
-  }
-  if(nx<worldMinX+rad||nx>worldMaxX-rad||nz<worldMinZ+rad||nz>worldMaxZ-rad) return false;
-  return true;
-}
-function hasLineOfSight(x1,z1,x2,z2){
-  var steps=Math.max(8, Math.ceil(Math.hypot(x2-x1,z2-z1)/0.35));
-  for(var s=1;s<steps;s++){
-    var t=s/steps;
-    var x=x1+(x2-x1)*t, z=z1+(z2-z1)*t;
-    for(var k=0;k<walls.length;k++){
-      var w=walls[k];
-      if(x>=w.minX && x<=w.maxX && z>=w.minZ && z<=w.maxZ) return false;
-    }
-  }
-  return true;
 }
 
 // ---------- enemies ----------
@@ -275,60 +177,90 @@ function makeSphere(radius,color){
   var m=new THREE.Mesh(new THREE.SphereGeometry(radius,20,16),new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:.6,roughness:.4}));
   scene.add(m); return m;
 }
-function randFarCell(){
-  var tries=0;
-  while(tries++<60){
-    var x=Math.floor(Math.random()*C);
-    var z=Math.floor(Math.random()*R);
-    if(z===0 && Math.abs(x-entranceCol)<=1) continue; // not next to entrance
-    return [x,z];
-  }
-  return [C-1, R-1];
-}
+function randCell(){ return [1+Math.floor(Math.random()*(R-1)), Math.floor(Math.random()*C)]; }
 function spawnEnemies(){
   for(var k=0;k<8;k++){
-    var rc=randFarCell();
+    var rc=randCell();
     var s=makeSphere(.5,0xdd2020);
-    s.position.set(cellX(rc[0])+(Math.random()-.5)*1.4, 1.4, cellZ(rc[1])+(Math.random()-.5)*1.4);
+    s.position.set(cellX(rc[1])+(Math.random()-.5)*2,1.4,cellZ(rc[0])+(Math.random()-.5)*2);
     enemies.push({mesh:s,alive:true,wanderT:new THREE.Vector3().copy(s.position),chase:false,dead:false});
   }
 }
 function pickFarCell(){
-  var best=[0,R-1], bd=-1;
-  for(var x=0;x<C;x++) for(var z=0;z<R;z++){
-    var d=z*z + Math.pow(x-entranceCol,2);
-    if(d>bd){ bd=d; best=[x,z]; }
-  }
-  return best;
+  var i=R-1, bestJ=0, bd=-1;
+  for(var j=0;j<C;j++){ var d=Math.abs(j-entranceCol); if(d>bd){bd=d;bestJ=j;} }
+  return [i,bestJ];
 }
 function spawnBoss(){
   bossDoorCell=pickFarCell();
-  var x=bossDoorCell[0], z=bossDoorCell[1];
-  var half=CS/2, cx=cellX(x), cz=cellZ(z), dh=1.15;
-  // Remove wall on the deep (north) side of that cell and put yellow door there
+  var i=bossDoorCell[0],j=bossDoorCell[1],half=CS/2,cx=cellX(j),cz=cellZ(i),dh=1.15;
+  // remove the S outer wall of that cell (mesh + collider) and replace with yellow door
   for(var w=walls.length-1;w>=0;w--){
     var wl=walls[w];
     var cxw=(wl.minX+wl.maxX)/2, czw=(wl.minZ+wl.maxZ)/2;
-    if(Math.abs(cxw-cx)<half+.3 && Math.abs(czw-(cz-half))<.55){
-      if(wl.mesh) scene.remove(wl.mesh);
-      walls.splice(w,1);
-    }
+    if(Math.abs(cxw-cx)<half+.2 && Math.abs(czw-(cz+half))<.5){ if(wl.mesh) scene.remove(wl.mesh); walls.splice(w,1); }
   }
   var doorMat=new THREE.MeshStandardMaterial({color:0xd8b41a,emissive:0x332200,emissiveIntensity:.4,roughness:.5});
-  var dmesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.28),doorMat);
-  dmesh.position.set(cx,1.7,cz-half);
+  var dmesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
+  dmesh.position.set(cx,1.7,cz+half);
   scene.add(dmesh);
-  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz-half-.15,maxZ:cz-half+.15};
+  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz+half-.2,maxZ:cz+half+.2};
   walls.push(doorWall);
-  bossDoor={mesh:dmesh,mat:doorMat,open:false,cell:[x,z],wallObj:doorWall};
-  boss=makeSphere(1.5,0xff1414);
+  bossDoor={mesh:dmesh,mat:doorMat,open:false,cell:[i,j],wallObj:doorWall};
+  boss=makeSphere(1.7,0xff1414);
   boss.material.emissiveIntensity=1;
-  boss.position.set(cx,2,cz);
-  bossLight=new THREE.PointLight(0xff2222,2.0,14);
+  boss.position.set(cx,2,cz-1.5);
+  bossLight=new THREE.PointLight(0xff2222,2.2,16);
   scene.add(bossLight);
 }
 
-// ---------- player ----------
+// ---------- minimap ----------
+var mapCanvas=document.getElementById('minimap'), mapCtx=mapCanvas.getContext('2d'), mapBounds=null;
+function computeMapBounds(){
+  var half=3;
+  var minX=Math.min(-half,cellX(0)-CS/2), maxX=Math.max(half,cellX(C-1)+CS/2);
+  var minZ=cellZ(R-1)-CS/2, maxZ=half;
+  mapBounds={minX:minX,maxX:maxX,minZ:minZ,maxZ:maxZ};
+}
+function drawMinimap(){
+  if(!mapBounds) return;
+  var w=mapCanvas.width,h=mapCanvas.height;
+  mapCtx.clearRect(0,0,w,h);
+  var sx=w/(mapBounds.maxX-mapBounds.minX), sz=h/(mapBounds.maxZ-mapBounds.minZ);
+  function px(x){return (x-mapBounds.minX)*sx;}
+  function pz(z){return (z-mapBounds.minZ)*sz;}
+  mapCtx.fillStyle='#6a8dff';
+  walls.forEach(function(wl){
+    var x1=px(wl.minX),x2=px(wl.maxX),y1=pz(wl.minZ),y2=pz(wl.maxZ);
+    mapCtx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.max(2,Math.abs(x2-x1)),Math.max(2,Math.abs(y2-y1)));
+  });
+  enemies.forEach(function(e){
+    if(!e.alive) return;
+    mapCtx.fillStyle=e.chase?'#ff5050':'#ff9a9a';
+    mapCtx.beginPath(); mapCtx.arc(px(e.mesh.position.x),pz(e.mesh.position.z),3,0,7); mapCtx.fill();
+  });
+  if(boss && !boss.dead && bossActive){
+    mapCtx.fillStyle='#ffce33';
+    mapCtx.beginPath(); mapCtx.arc(px(boss.position.x),pz(boss.position.z),5,0,7); mapCtx.fill();
+  }
+  var pxp=px(pos.x), pzp=pz(pos.z);
+  mapCtx.strokeStyle='#fff'; mapCtx.lineWidth=2;
+  mapCtx.beginPath(); mapCtx.moveTo(pxp,pzp); mapCtx.lineTo(pxp-Math.sin(theta)*9,pzp-Math.cos(theta)*9); mapCtx.stroke();
+  mapCtx.fillStyle='#fff';
+  mapCtx.beginPath(); mapCtx.arc(pxp,pzp,3.5,0,7); mapCtx.fill();
+}
+
+// ---------- movement / collision ----------
+function tryMove(nx,nz,rad){
+  rad=rad||.32;
+  for(var k=0;k<walls.length;k++){ var w=walls[k];
+    var cx=Math.max(w.minX,Math.min(nx,w.maxX));
+    var cz=Math.max(w.minZ,Math.min(nz,w.maxZ));
+    var dx=nx-cx, dz=nz-cz;
+    if(dx*dx+dz*dz<rad*rad) return false;
+  }
+  return true;
+}
 var pitch=0, mouseSens=0.0022;
 function updatePlayer(dt){
   var turn=2.2*dt, spd=5*dt;
@@ -341,119 +273,72 @@ function updatePlayer(dt){
     if(tryMove(nx,pos.z)) pos.x=nx;
     if(tryMove(pos.x,nz)) pos.z=nz;
   }
-  var rad=0.35;
-  pos.x=Math.max(worldMinX+rad, Math.min(worldMaxX-rad, pos.x));
-  pos.z=Math.max(worldMinZ+rad, Math.min(worldMaxZ-rad, pos.z));
   camera.position.copy(pos); camera.rotation.set(pitch,theta,0);
 }
 
 // ---------- enemy AI ----------
-var REPEL_DIST=2.8;
+var chasingEnemy=null, levelWon=false;
 function updateEnemies(dt){
-  for(var a=0;a<enemies.length;a++){
-    if(!enemies[a].alive) continue;
-    for(var b=a+1;b<enemies.length;b++){
-      if(!enemies[b].alive) continue;
-      var pa=enemies[a].mesh.position, pb=enemies[b].mesh.position;
-      var dx=pa.x-pb.x, dz=pa.z-pb.z;
-      var dist=Math.hypot(dx,dz);
-      if(dist<REPEL_DIST && dist>0.01){
-        var force=((REPEL_DIST-dist)/REPEL_DIST)*2.5*dt;
-        var nx=dx/dist, nz=dz/dist;
-        var ax=pa.x+nx*force, az=pa.z+nz*force;
-        var bx=pb.x-nx*force, bz=pb.z-nz*force;
-        if(tryMove(ax,pa.z,.4)) pa.x=ax;
-        if(tryMove(pa.x,az,.4)) pa.z=az;
-        if(tryMove(bx,pb.z,.4)) pb.x=bx;
-        if(tryMove(pb.x,bz,.4)) pb.z=bz;
-      }
-    }
-  }
-
-  var chaser=null, bestD=Infinity;
-  enemies.forEach(function(e){
-    e.chase=false;
-    if(!e.alive) return;
-    var d=e.mesh.position.distanceTo(pos);
-    if(d<9 && d<bestD && hasLineOfSight(e.mesh.position.x,e.mesh.position.z,pos.x,pos.z)){
-      bestD=d; chaser=e;
-    }
-  });
-  if(chaser) chaser.chase=true;
-
   enemies.forEach(function(e){
     if(!e.alive) return;
     var d=e.mesh.position.distanceTo(pos);
+    if(!e.chase && d<9 && chasingEnemy===null){ e.chase=true; chasingEnemy=e; }
     if(e.chase){
       var t=performance.now();
       e.mesh.material.emissive.setHex(Math.floor(t/130)%2? 0xff0000:0xffffff);
       var dir=new THREE.Vector3().subVectors(pos,e.mesh.position); dir.y=0; dir.normalize();
-      var nx=e.mesh.position.x+dir.x*3.0*dt, nz=e.mesh.position.z+dir.z*3.0*dt;
+      var nx=e.mesh.position.x+dir.x*3.2*dt, nz=e.mesh.position.z+dir.z*3.2*dt;
       if(tryMove(nx,e.mesh.position.z,.4)) e.mesh.position.x=nx;
       if(tryMove(e.mesh.position.x,nz,.4)) e.mesh.position.z=nz;
     } else {
-      e.mesh.material.emissive.setHex(0xdd2020);
       var dir2=new THREE.Vector3().subVectors(e.wanderT,e.mesh.position); dir2.y=0;
-      if(dir2.length()<.3){ var rc=randFarCell(); e.wanderT.set(cellX(rc[0]),1.4,cellZ(rc[1])); }
+      if(dir2.length()<.3){
+        var rc, tries=0, tooClose;
+        do{
+          rc=randCell(); tooClose=false;
+          for(var m=0;m<enemies.length;m++){
+            var other=enemies[m]; if(other===e || !other.alive) continue;
+            var ddx=cellX(rc[1])-other.mesh.position.x, ddz=cellZ(rc[0])-other.mesh.position.z;
+            if(ddx*ddx+ddz*ddz<CS*CS){ tooClose=true; break; }
+          }
+          tries++;
+        } while(tooClose && tries<6);
+        e.wanderT.set(cellX(rc[1]),1.4,cellZ(rc[0]));
+      }
       else { dir2.normalize(); var nx2=e.mesh.position.x+dir2.x*1*dt, nz2=e.mesh.position.z+dir2.z*1*dt; if(tryMove(nx2,e.mesh.position.z,.4)) e.mesh.position.x=nx2; if(tryMove(e.mesh.position.x,nz2,.4)) e.mesh.position.z=nz2; }
     }
-    if(d<1.3 && !noteGame.active && hasLineOfSight(e.mesh.position.x,e.mesh.position.z,pos.x,pos.z)){
-      triggerEncounter('enemy',e);
-    }
+    if(d<1.3 && !noteGame.active && !levelWon) triggerEncounter('enemy',e);
   });
-
+  // keep enemies from clumping together
+  for(var a=0;a<enemies.length;a++){
+    var ea=enemies[a]; if(!ea.alive) continue;
+    var push=new THREE.Vector3();
+    for(var b=0;b<enemies.length;b++){
+      if(a===b) continue; var eb=enemies[b]; if(!eb.alive) continue;
+      var dd=ea.mesh.position.distanceTo(eb.mesh.position);
+      if(dd>0 && dd<1.6){ var away=new THREE.Vector3().subVectors(ea.mesh.position,eb.mesh.position); away.y=0; away.normalize(); push.add(away.multiplyScalar((1.6-dd)/1.6)); }
+    }
+    if(push.lengthSq()>0){
+      var pnx=ea.mesh.position.x+push.x*dt*2, pnz=ea.mesh.position.z+push.z*dt*2;
+      if(tryMove(pnx,ea.mesh.position.z,.4)) ea.mesh.position.x=pnx;
+      if(tryMove(ea.mesh.position.x,pnz,.4)) ea.mesh.position.z=pnz;
+    }
+  }
   if(boss && !boss.dead){
     var db=boss.position.distanceTo(pos);
-    if(db<12 && hasLineOfSight(boss.position.x,boss.position.z,pos.x,pos.z)){
+    if(db<14){
       var t2=performance.now(); boss.material.emissive.setHex(Math.floor(t2/130)%2?0xff0000:0xffcccc);
       var dir3=new THREE.Vector3().subVectors(pos,boss.position); dir3.y=0; dir3.normalize();
-      var nx3=boss.position.x+dir3.x*2.2*dt, nz3=boss.position.z+dir3.z*2.2*dt;
+      var nx3=boss.position.x+dir3.x*2.4*dt, nz3=boss.position.z+dir3.z*2.4*dt;
       if(tryMove(nx3,boss.position.z,1)) boss.position.x=nx3;
       if(tryMove(boss.position.x,nz3,1)) boss.position.z=nz3;
     }
     bossLight.position.copy(boss.position);
-    if(db<2.2 && !noteGame.active && hasLineOfSight(boss.position.x,boss.position.z,pos.x,pos.z)){
-      triggerEncounter('boss',null);
-    }
+    if(db<2.3 && !noteGame.active && !levelWon) triggerEncounter('boss',null);
   }
 }
 
-// ---------- minimap ----------
-function drawMinimap(){
-  var cv=document.getElementById('minimap');
-  if(cv.classList.contains('hidden')) return;
-  var ctx=cv.getContext('2d');
-  var W=cv.width, H=cv.height;
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='rgba(20,15,40,0.9)';
-  ctx.fillRect(0,0,W,H);
-  function wx(x){ return ((x-worldMinX)/(worldMaxX-worldMinX))*W; }
-  function wz(z){ return ((z-worldMinZ)/(worldMaxZ-worldMinZ))*H; }
-  ctx.strokeStyle='#5a8cff';
-  ctx.lineWidth=2;
-  walls.forEach(function(w){
-    var x1=wx(w.minX), x2=wx(w.maxX), z1=wz(w.minZ), z2=wz(w.maxZ);
-    ctx.strokeRect(Math.min(x1,x2), Math.min(z1,z2), Math.abs(x2-x1)||1, Math.abs(z2-z1)||1);
-  });
-  enemies.forEach(function(e){
-    if(!e.alive) return;
-    ctx.fillStyle='#ff4040';
-    ctx.beginPath(); ctx.arc(wx(e.mesh.position.x), wz(e.mesh.position.z), 4, 0, Math.PI*2); ctx.fill();
-  });
-  if(boss && !boss.dead){
-    ctx.fillStyle='#ff2020';
-    ctx.beginPath(); ctx.arc(wx(boss.position.x), wz(boss.position.z), 7, 0, Math.PI*2); ctx.fill();
-  }
-  ctx.fillStyle='#40ff90';
-  ctx.beginPath(); ctx.arc(wx(pos.x), wz(pos.z), 5, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle='#40ff90'; ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.moveTo(wx(pos.x), wz(pos.z));
-  ctx.lineTo(wx(pos.x - Math.sin(theta)*1.2), wz(pos.z - Math.cos(theta)*1.2));
-  ctx.stroke();
-}
-
-// ---------- doors ----------
+// ---------- doors hover/click ----------
 function updateHover(){
   var ndc = document.pointerLockElement ? {x:0,y:0} : mouseNDC;
   raycaster.setFromCamera(ndc,camera);
@@ -477,12 +362,17 @@ function requestLook(){ if(renderer && !document.pointerLockElement) renderer.do
 document.addEventListener('click',function(){
   ac();
   if(noteGame.active) return;
-  if(hoverDoor===redDoor && !redDoorOpen){ sfxHappyDoor(); startNoteGame('door1'); }
-  else if(hoverDoor===bossDoor && bossDoor && !bossDoor.open){ fadeOutComplete(); }
+  if(hoverDoor===redDoor && !redDoorOpen) startNoteGame('door1');
+  else if(hoverDoor===bossDoor && bossDoor && !bossDoor.open){ openBossDoor(); }
   else if(camera && !document.getElementById('hud').classList.contains('hidden')) requestLook();
 });
 
-// ---------- HUD ----------
+function openBossDoor(){
+  bossDoor.open=true; scene.remove(bossDoor.mesh);
+  var idx=walls.indexOf(bossDoor.wallObj); if(idx>-1) walls.splice(idx,1);
+}
+
+// ---------- HUD / life ----------
 var life=100;
 function setLife(v){
   life=Math.max(0,Math.min(100,v));
@@ -498,7 +388,7 @@ function centerText(txt,dur){ var el=document.getElementById('centertext'); el.t
 // ---------- note game ----------
 var noteGame={active:false,seq:[],type:null,timer:null,countdownEnd:0,enemyRef:null};
 var POOL=['F4','A4','C5','E5'];
-function genSeq(n){
+function genSeq(n,noRepeatAdjacentOnly){
   if(n<=4){ var p=POOL.slice(); for(var i=p.length-1;i>0;i--){var r=Math.floor(Math.random()*(i+1));var t=p[i];p[i]=p[r];p[r]=t;} return p.slice(0,n); }
   var out=[],last=null;
   for(var k=0;k<n;k++){ var c; do{ c=POOL[Math.floor(Math.random()*POOL.length)]; }while(c===last); out.push(c); last=c; }
@@ -576,56 +466,37 @@ function handleNotePlayed(name){
     noteGame.seq.shift(); flash('good'); renderStaff();
     if(!noteGame.seq.length){ endNoteGame(true); }
   } else {
-    flash('bad');
+    flash('bad'); sfxWrong();
     if(noteGame.type!=='door1'){
       if(life-10<=0){ setLife(0); return; }
-      setLife(life-10); sfxWrong();
+      setLife(life-10);
     }
     noteGame.seq=genSeq(noteGame.type==='boss'?8:4); renderStaff();
   }
 }
 
-function hideNoteGameUI(){
-  clearCountdown();
-  noteGame.active=false;
-  noteGame.seq=[];
-  noteGame.type=null;
-  noteGame.enemyRef=null;
-  document.getElementById('notegame').classList.add('hidden');
-  document.getElementById('staffsvg').innerHTML='';
-}
-
 function endNoteGame(success){
-  var finishedType=noteGame.type;
-  var finishedEnemy=noteGame.enemyRef;
-  hideNoteGameUI();
+  clearCountdown(); noteGame.active=false;
+  document.getElementById('notegame').classList.add('hidden');
   if(!success) return;
   requestLook();
   sfxWin();
-  if(finishedType==='door1'){ openRedDoor(); }
-  else if(finishedType==='enemy'){
-    setLife(Math.min(100,life+20));
-    explode(finishedEnemy.mesh);
-    finishedEnemy.alive=false;
-    defeated++;
-    if(defeated>=8) startBossPhase();
-  }
-  else if(finishedType==='boss'){
-    setLife(100);
-    explodeBoss();
-  }
+  if(noteGame.type==='door1'){ openRedDoor(); }
+  else if(noteGame.type==='enemy'){ setLife(Math.min(100,life+20)); if(chasingEnemy===noteGame.enemyRef) chasingEnemy=null; noteGame.enemyRef.alive=false; explode(noteGame.enemyRef.mesh); defeated++; if(defeated>=8) startBossPhase(); }
+  else if(noteGame.type==='boss'){ setLife(100); levelWon=true; explodeBoss(); }
 }
 
 function explode(mesh){
+  sfxExplosion();
   var t0=performance.now();
   function step(){ var t=(performance.now()-t0)/500; if(t>=1){ scene.remove(mesh); return; } mesh.scale.setScalar(1+t*2); mesh.material.opacity=1-t; mesh.material.transparent=true; requestAnimationFrame(step); }
   step();
 }
 function explodeBoss(){
-  bossActive=false;
-  if(bossLight) scene.remove(bossLight);
+  boss.dead=true; bossActive=false; scene.remove(bossLight);
+  sfxExplosion();
   var t0=performance.now(),m=boss;
-  function step(){ var t=(performance.now()-t0)/800; if(t>=1){ scene.remove(m); if(boss) boss.dead=true; return; } m.scale.setScalar(1+t*3); m.material.opacity=1-t; m.material.transparent=true; requestAnimationFrame(step); }
+  function step(){ var t=(performance.now()-t0)/800; if(t>=1){ scene.remove(m); return; } m.scale.setScalar(1+t*3); m.material.opacity=1-t; m.material.transparent=true; requestAnimationFrame(step); }
   step();
 }
 
@@ -639,32 +510,36 @@ function openRedDoor(){
 
 function startBossPhase(){
   bossActive=true;
-  centerText('Find the yellow door — or face the boss!',4000);
+  centerText('Find the yellow door and defeat the boss.',4000);
   spawnBoss();
 }
 
 function triggerEncounter(type,enemyRef){
-  if(noteGame.active) return;
+  if(noteGame.active || levelWon) return;
   startNoteGame(type,enemyRef);
 }
 
+// ---------- level complete ----------
+function checkLevelExit(){
+  if(!bossDoor || !bossDoor.open) return;
+  var i=bossDoorCell[0],j=bossDoorCell[1],cz=cellZ(i)+CS/2;
+  if(pos.z>cz+1.2){ fadeOutComplete(); }
+}
 var completing=false;
 function fadeOutComplete(){
   if(completing) return; completing=true; frozen=true;
-  hideNoteGameUI();
-  if(document.pointerLockElement) document.exitPointerLock();
-  var f=document.getElementById('flash');
-  f.style.transition='opacity 1s'; f.style.background='#000'; f.style.opacity=1;
+  var f=document.getElementById('flash'); f.style.transition='opacity 1s'; f.style.background='#000'; f.style.opacity=1;
   setTimeout(function(){ document.getElementById('levelcomplete').classList.remove('hidden'); },1000);
 }
 
-function gameOver(){ frozen=true; hideNoteGameUI(); document.getElementById('gameover').classList.remove('hidden'); }
+function gameOver(){ frozen=true; document.getElementById('gameover').classList.remove('hidden'); }
 
+// ---------- main loop ----------
 function animate(){
   requestAnimationFrame(animate);
   var dt=Math.min(.05,clock.getDelta());
   if(!frozen){ updatePlayer(dt); }
-  if(!noteGame.active && !frozen){ updateEnemies(dt); }
+  if(!noteGame.active && !frozen){ updateEnemies(dt); checkLevelExit(); }
   updateHover();
   drawMinimap();
   renderer.render(scene,camera);
@@ -680,11 +555,7 @@ document.getElementById('startBtn').addEventListener('click',function(){
   document.getElementById('crosshair').classList.remove('hidden');
   document.getElementById('minimap').classList.remove('hidden');
   setLife(100);
-  initThree();
-  buildRoom();
-  generateMaze();   // liminal-style recursive backtracker
-  buildMazeMesh();
-  spawnEnemies();
+  initThree(); buildRoom(); genMaze(); buildMazeMesh(); spawnEnemies();
   camera.position.copy(pos); camera.rotation.set(0,theta,0);
   frozen=false;
   requestLook();
