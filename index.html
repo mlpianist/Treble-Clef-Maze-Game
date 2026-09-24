@@ -55,25 +55,20 @@ button:hover{background:#59bcee}
 "use strict";
 var VF=Vex.Flow;
 var scene,camera,renderer,clock=new THREE.Clock();
-var walls=[]; // {minX,maxX,minZ,maxZ,mesh?}
-var CS=5.5, R=3, C=4, ROOMZ=4;
+var walls=[];
+var CS=5.5, R=3, C=4, ROOM_HALF=3;
 var entranceCol=Math.floor(C/2);
 var grid=[];
-var theta=0, pos=new THREE.Vector3(0,1.6,2);
+var theta=0, pos=new THREE.Vector3(0,1.6,1.5);
 var keys={};
 var enemies=[], boss=null, bossLight=null, defeated=0, bossActive=false, bossDoor=null, bossDoorCell=null;
 var redDoor, redDoorOpen=false, redDoorMesh=null;
 var frozen=true;
 var raycaster=new THREE.Raycaster(), mouseNDC=new THREE.Vector2();
 var hoverDoor=null;
-
-// World bounds (set after building maze) — used by minimap + hard clamp
 var worldMinX=-8, worldMaxX=8, worldMinZ=-30, worldMaxZ=6;
 
-// colors
-var FLOOR_COL=0x6b3fa0;
-var WALL_COL=0x3a6ad8;
-var CEIL_COL=0x9ec8f0;
+var FLOOR_COL=0x6b3fa0, WALL_COL=0x3a6ad8, CEIL_COL=0x9ec8f0;
 
 // ---------- audio ----------
 var actx=null;
@@ -81,13 +76,11 @@ function ac(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContex
 function tone(freq,dur,type){ var a=ac(); var o=a.createOscillator(),g=a.createGain(); o.type=type||'sine'; o.frequency.setValueAtTime(freq,a.currentTime); g.gain.setValueAtTime(.22,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+dur); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur); }
 function sfxWrong(){ var a=ac(),o=a.createOscillator(),g=a.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(500,a.currentTime); o.frequency.exponentialRampToValueAtTime(120,a.currentTime+.6); g.gain.setValueAtTime(.18,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+.6); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+.6); }
 function sfxWin(){ [523.25,659.25,783.99,1046.5].forEach(function(f,i){ setTimeout(function(){tone(f,.35,'triangle');},i*90); }); }
-function sfxHappyDoor(){ // brighter, cheerful arpeggio when clicking red door
-  [392,523.25,659.25,783.99,1046.5].forEach(function(f,i){ setTimeout(function(){tone(f,.28,'triangle');},i*70); });
-}
+function sfxHappyDoor(){ [392,523.25,659.25,783.99,1046.5].forEach(function(f,i){ setTimeout(function(){tone(f,.28,'triangle');},i*70); }); }
 
 var FREQ={C4:261.63,'C#4':277.18,D4:293.66,'D#4':311.13,E4:329.63,F4:349.23,'F#4':369.99,G4:392,'G#4':415.3,A4:440,'A#4':466.16,B4:493.88,C5:523.25,'C#5':554.37,D5:587.33,'D#5':622.25,E5:659.25,F5:698.46,'F#5':739.99,G5:783.99};
 
-// ---------- three setup ----------
+// ---------- three ----------
 function initThree(){
   scene=new THREE.Scene(); scene.background=new THREE.Color(CEIL_COL); scene.fog=new THREE.Fog(CEIL_COL,10,45);
   camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,0.1,200);
@@ -99,7 +92,8 @@ function initThree(){
 }
 
 function addWall(x0,z0,x1,z1){
-  var len=Math.hypot(x1-x0,z1-z0), H=4, T=.3;
+  var len=Math.hypot(x1-x0,z1-z0), H=4, T=.35;
+  if(len<0.01) return null;
   var m=new THREE.Mesh(new THREE.BoxGeometry(len+T,H,T),new THREE.MeshStandardMaterial({color:WALL_COL,roughness:.85}));
   m.position.set((x0+x1)/2,H/2,(z0+z1)/2);
   m.rotation.y=Math.atan2(z1-z0,x1-x0);
@@ -111,18 +105,24 @@ function addWall(x0,z0,x1,z1){
   return wallObj;
 }
 
+function cellX(j){ return (j - entranceCol) * CS; }
+// Row 0 sits just north of the start-room doorway so the player walks straight in
+function cellZ(i){ return -ROOM_HALF - CS/2 - i * CS; }
+
 function buildRoom(){
   var g=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
   g.rotation.x=-Math.PI/2; scene.add(g);
   var ceil=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
   ceil.rotation.x=Math.PI/2; ceil.position.y=4.05; scene.add(ceil);
 
-  var half=3, dh=1.15;
+  var half=ROOM_HALF, dh=1.15;
+  // start-room walls (gap on north for red door)
   addWall(-half,-half,-dh,-half);
   addWall(dh,-half,half,-half);
   addWall(-half,half,half,half);
   addWall(-half,-half,-half,half);
   addWall(half,-half,half,half);
+
   var doorMat=new THREE.MeshStandardMaterial({color:0xb5271f,emissive:0x220000,emissiveIntensity:.4,roughness:.5});
   redDoorMesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
   redDoorMesh.position.set(0,1.7,-half);
@@ -133,6 +133,7 @@ function buildRoom(){
 }
 
 function genMaze(){
+  // Perfect maze via recursive backtracker — every cell is reachable from every other
   for(var i=0;i<R;i++){ grid[i]=[]; for(var j=0;j<C;j++) grid[i][j]={N:true,S:true,E:true,W:true,v:false}; }
   var stack=[[0,entranceCol]]; grid[0][entranceCol].v=true;
   while(stack.length){
@@ -151,28 +152,47 @@ function genMaze(){
     if(dir==='E'){grid[i][j].E=false;grid[ni][nj].W=false;}
     grid[ni][nj].v=true; stack.push([ni,nj]);
   }
+  // Explicit entrance: open the SOUTH side of the entrance cell so it joins the start room
+  grid[0][entranceCol].S=false;
 }
-
-function cellX(j){ return (j-entranceCol)*CS; }
-function cellZ(i){ return -ROOMZ-3-i*CS; }
 
 function buildMazeMesh(){
   var half=CS/2;
-  var g=new THREE.Mesh(new THREE.PlaneGeometry(C*CS+8,R*CS+ROOMZ+12),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
+
+  // Floor & ceiling covering start room + maze
+  var floorW=C*CS+6, floorD=R*CS+ROOM_HALF*2+4;
+  var g=new THREE.Mesh(new THREE.PlaneGeometry(floorW,floorD),new THREE.MeshStandardMaterial({color:FLOOR_COL}));
   g.rotation.x=-Math.PI/2; g.position.set(0,-0.001,cellZ(R/2)); scene.add(g);
-  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(C*CS+8,R*CS+ROOMZ+12),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
+  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(floorW,floorD),new THREE.MeshStandardMaterial({color:CEIL_COL,side:THREE.DoubleSide}));
   ceil.rotation.x=Math.PI/2; ceil.position.set(0,4.05,cellZ(R/2)); scene.add(ceil);
 
+  // Internal maze walls
   for(var i=0;i<R;i++) for(var j=0;j<C;j++){
     var cx=cellX(j), cz=cellZ(i);
     var cell=grid[i][j];
-    if(cell.N && !(i===0 && j===entranceCol)) addWall(cx-half,cz-half,cx+half,cz-half);
-    if(cell.S) addWall(cx-half,cz+half,cx+half,cz+half);
+    // North wall of cell
+    if(cell.N) addWall(cx-half,cz-half,cx+half,cz-half);
+    // South wall — skip for entrance cell (connects to start room)
+    if(cell.S && !(i===0 && j===entranceCol)) addWall(cx-half,cz+half,cx+half,cz+half);
     if(cell.W) addWall(cx-half,cz-half,cx-half,cz+half);
     if(cell.E) addWall(cx+half,cz-half,cx+half,cz+half);
   }
 
-  // Compute tight world bounds from all walls (used by minimap + player clamp)
+  // Outer boundary walls of the whole maze (guaranteed closed perimeter)
+  var left=cellX(0)-half, right=cellX(C-1)+half;
+  var top=cellZ(R-1)-half;          // most negative Z
+  var bottom=cellZ(0)+half;         // closest to start room
+  // North outer
+  addWall(left,top,right,top);
+  // South outer — leave gap at entrance column so start-room door connects
+  var entL=cellX(entranceCol)-1.15, entR=cellX(entranceCol)+1.15;
+  addWall(left,bottom,entL,bottom);
+  addWall(entR,bottom,right,bottom);
+  // West & east outer
+  addWall(left,top,left,bottom);
+  addWall(right,top,right,bottom);
+
+  // World bounds from walls (minimap + player clamp)
   worldMinX=Infinity; worldMaxX=-Infinity; worldMinZ=Infinity; worldMaxZ=-Infinity;
   walls.forEach(function(w){
     worldMinX=Math.min(worldMinX,w.minX);
@@ -180,12 +200,15 @@ function buildMazeMesh(){
     worldMinZ=Math.min(worldMinZ,w.minZ);
     worldMaxZ=Math.max(worldMaxZ,w.maxZ);
   });
-  // small padding so dots aren't clipped on the minimap edge
-  var pad=0.4;
+  // Include start room in bounds
+  worldMinX=Math.min(worldMinX,-ROOM_HALF-0.5);
+  worldMaxX=Math.max(worldMaxX,ROOM_HALF+0.5);
+  worldMaxZ=Math.max(worldMaxZ,ROOM_HALF+0.5);
+  var pad=0.35;
   worldMinX-=pad; worldMaxX+=pad; worldMinZ-=pad; worldMaxZ+=pad;
 }
 
-// ---------- collision helpers ----------
+// ---------- collision ----------
 function tryMove(nx,nz,rad){
   rad=rad||.32;
   for(var k=0;k<walls.length;k++){ var w=walls[k];
@@ -194,12 +217,9 @@ function tryMove(nx,nz,rad){
     var dx=nx-cx, dz=nz-cz;
     if(dx*dx+dz*dz<rad*rad) return false;
   }
-  // hard clamp to world bounds
   if(nx<worldMinX+rad||nx>worldMaxX-rad||nz<worldMinZ+rad||nz>worldMaxZ-rad) return false;
   return true;
 }
-
-/** True if the straight line between (x1,z1) and (x2,z2) does not cross any wall AABB. */
 function hasLineOfSight(x1,z1,x2,z2){
   var steps=Math.max(8, Math.ceil(Math.hypot(x2-x1,z2-z1)/0.35));
   for(var s=1;s<steps;s++){
@@ -220,50 +240,55 @@ function makeSphere(radius,color){
 }
 function randFarCell(){
   var tries=0;
-  while(tries++<40){
-    var i=1+Math.floor(Math.random()*(R-1));
+  while(tries++<50){
+    var i=Math.floor(Math.random()*R);
     var j=Math.floor(Math.random()*C);
-    if(i===1 && Math.abs(j-entranceCol)<=1) continue;
+    // keep away from entrance cell
+    if(i===0 && Math.abs(j-entranceCol)<=1) continue;
     return [i,j];
   }
-  return [R-1, Math.floor(Math.random()*C)];
+  return [R-1, C-1];
 }
 function spawnEnemies(){
   for(var k=0;k<8;k++){
     var rc=randFarCell();
     var s=makeSphere(.5,0xdd2020);
-    s.position.set(cellX(rc[1])+(Math.random()-.5)*1.8,1.4,cellZ(rc[0])+(Math.random()-.5)*1.8);
+    s.position.set(cellX(rc[1])+(Math.random()-.5)*1.5,1.4,cellZ(rc[0])+(Math.random()-.5)*1.5);
     enemies.push({mesh:s,alive:true,wanderT:new THREE.Vector3().copy(s.position),chase:false,dead:false});
   }
 }
 function pickFarCell(){
-  var best=[0,0],bd=-1;
-  for(var i=0;i<R;i++) for(var j=0;j<C;j++){ var d=(i*i)+Math.pow(j-entranceCol,2); if(d>bd){bd=d;best=[i,j];} }
+  var best=[R-1,0],bd=-1;
+  for(var i=0;i<R;i++) for(var j=0;j<C;j++){
+    var d=i*i+Math.pow(j-entranceCol,2);
+    if(d>bd){bd=d;best=[i,j];}
+  }
   return best;
 }
 function spawnBoss(){
   bossDoorCell=pickFarCell();
   var i=bossDoorCell[0],j=bossDoorCell[1],half=CS/2,cx=cellX(j),cz=cellZ(i),dh=1.15;
+  // open the north face of that cell for the yellow door
   for(var w=walls.length-1;w>=0;w--){
     var wl=walls[w];
     var cxw=(wl.minX+wl.maxX)/2, czw=(wl.minZ+wl.maxZ)/2;
-    if(Math.abs(cxw-cx)<half+.2 && Math.abs(czw-(cz+half))<.5){ if(wl.mesh) scene.remove(wl.mesh); walls.splice(w,1); }
+    if(Math.abs(cxw-cx)<half+.3 && Math.abs(czw-(cz-half))<.6){ if(wl.mesh) scene.remove(wl.mesh); walls.splice(w,1); }
   }
   var doorMat=new THREE.MeshStandardMaterial({color:0xd8b41a,emissive:0x332200,emissiveIntensity:.4,roughness:.5});
   var dmesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
-  dmesh.position.set(cx,1.7,cz+half);
+  dmesh.position.set(cx,1.7,cz-half);
   scene.add(dmesh);
-  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz+half-.2,maxZ:cz+half+.2};
+  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz-half-.2,maxZ:cz-half+.2};
   walls.push(doorWall);
   bossDoor={mesh:dmesh,mat:doorMat,open:false,cell:[i,j],wallObj:doorWall};
   boss=makeSphere(1.5,0xff1414);
   boss.material.emissiveIntensity=1;
-  boss.position.set(cx,2,cz-1.2);
+  boss.position.set(cx,2,cz);
   bossLight=new THREE.PointLight(0xff2222,2.0,14);
   scene.add(bossLight);
 }
 
-// ---------- movement ----------
+// ---------- player ----------
 var pitch=0, mouseSens=0.0022;
 function updatePlayer(dt){
   var turn=2.2*dt, spd=5*dt;
@@ -276,7 +301,6 @@ function updatePlayer(dt){
     if(tryMove(nx,pos.z)) pos.x=nx;
     if(tryMove(pos.x,nz)) pos.z=nz;
   }
-  // final hard clamp
   var rad=0.35;
   pos.x=Math.max(worldMinX+rad, Math.min(worldMaxX-rad, pos.x));
   pos.z=Math.max(worldMinZ+rad, Math.min(worldMaxZ-rad, pos.z));
@@ -286,7 +310,6 @@ function updatePlayer(dt){
 // ---------- enemy AI ----------
 var REPEL_DIST=2.8;
 function updateEnemies(dt){
-  // --- mutual repulsion ---
   for(var a=0;a<enemies.length;a++){
     if(!enemies[a].alive) continue;
     for(var b=a+1;b<enemies.length;b++){
@@ -307,7 +330,6 @@ function updateEnemies(dt){
     }
   }
 
-  // --- pick at most ONE chaser: closest alive enemy with clear LOS ---
   var chaser=null, bestD=Infinity;
   enemies.forEach(function(e){
     e.chase=false;
@@ -335,7 +357,6 @@ function updateEnemies(dt){
       if(dir2.length()<.3){ var rc=randFarCell(); e.wanderT.set(cellX(rc[1]),1.4,cellZ(rc[0])); }
       else { dir2.normalize(); var nx2=e.mesh.position.x+dir2.x*1*dt, nz2=e.mesh.position.z+dir2.z*1*dt; if(tryMove(nx2,e.mesh.position.z,.4)) e.mesh.position.x=nx2; if(tryMove(e.mesh.position.x,nz2,.4)) e.mesh.position.z=nz2; }
     }
-    // contact only with clear line of sight (no wall between)
     if(d<1.3 && !noteGame.active && hasLineOfSight(e.mesh.position.x,e.mesh.position.z,pos.x,pos.z)){
       triggerEncounter('enemy',e);
     }
@@ -357,7 +378,7 @@ function updateEnemies(dt){
   }
 }
 
-// ---------- minimap (bounds = world walls) ----------
+// ---------- minimap ----------
 function drawMinimap(){
   var cv=document.getElementById('minimap');
   if(cv.classList.contains('hidden')) return;
@@ -366,43 +387,33 @@ function drawMinimap(){
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle='rgba(20,15,40,0.9)';
   ctx.fillRect(0,0,W,H);
-
   function wx(x){ return ((x-worldMinX)/(worldMaxX-worldMinX))*W; }
   function wz(z){ return ((z-worldMinZ)/(worldMaxZ-worldMinZ))*H; }
-
   ctx.strokeStyle='#5a8cff';
   ctx.lineWidth=2;
   walls.forEach(function(w){
     var x1=wx(w.minX), x2=wx(w.maxX), z1=wz(w.minZ), z2=wz(w.maxZ);
     ctx.strokeRect(Math.min(x1,x2), Math.min(z1,z2), Math.abs(x2-x1)||1, Math.abs(z2-z1)||1);
   });
-
   enemies.forEach(function(e){
     if(!e.alive) return;
     ctx.fillStyle='#ff4040';
-    ctx.beginPath();
-    ctx.arc(wx(e.mesh.position.x), wz(e.mesh.position.z), 4, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(wx(e.mesh.position.x), wz(e.mesh.position.z), 4, 0, Math.PI*2); ctx.fill();
   });
   if(boss && !boss.dead){
     ctx.fillStyle='#ff2020';
-    ctx.beginPath();
-    ctx.arc(wx(boss.position.x), wz(boss.position.z), 7, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(wx(boss.position.x), wz(boss.position.z), 7, 0, Math.PI*2); ctx.fill();
   }
   ctx.fillStyle='#40ff90';
-  ctx.beginPath();
-  ctx.arc(wx(pos.x), wz(pos.z), 5, 0, Math.PI*2);
-  ctx.fill();
-  ctx.strokeStyle='#40ff90';
-  ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(wx(pos.x), wz(pos.z), 5, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#40ff90'; ctx.lineWidth=2;
   ctx.beginPath();
   ctx.moveTo(wx(pos.x), wz(pos.z));
   ctx.lineTo(wx(pos.x - Math.sin(theta)*1.2), wz(pos.z - Math.cos(theta)*1.2));
   ctx.stroke();
 }
 
-// ---------- doors hover/click ----------
+// ---------- doors ----------
 function updateHover(){
   var ndc = document.pointerLockElement ? {x:0,y:0} : mouseNDC;
   raycaster.setFromCamera(ndc,camera);
@@ -426,17 +437,12 @@ function requestLook(){ if(renderer && !document.pointerLockElement) renderer.do
 document.addEventListener('click',function(){
   ac();
   if(noteGame.active) return;
-  if(hoverDoor===redDoor && !redDoorOpen){
-    sfxHappyDoor();           // happy sound on red-door click
-    startNoteGame('door1');
-  }
-  else if(hoverDoor===bossDoor && bossDoor && !bossDoor.open){
-    fadeOutComplete();
-  }
+  if(hoverDoor===redDoor && !redDoorOpen){ sfxHappyDoor(); startNoteGame('door1'); }
+  else if(hoverDoor===bossDoor && bossDoor && !bossDoor.open){ fadeOutComplete(); }
   else if(camera && !document.getElementById('hud').classList.contains('hidden')) requestLook();
 });
 
-// ---------- HUD / life ----------
+// ---------- HUD ----------
 var life=100;
 function setLife(v){
   life=Math.max(0,Math.min(100,v));
@@ -545,21 +551,10 @@ function hideNoteGameUI(){
   noteGame.seq=[];
   noteGame.type=null;
   noteGame.enemyRef=null;
-  var ng=document.getElementById('notegame');
-  ng.classList.add('hidden');
-  // fully clear staff so nothing lingers
+  document.getElementById('notegame').classList.add('hidden');
   document.getElementById('staffsvg').innerHTML='';
 }
 
-function endNoteGame(success){
-  hideNoteGameUI();
-  if(!success) return;
-  requestLook();
-  sfxWin();
-  if(noteGame.type==='door1' || arguments.callee && false){} // type already cleared; use saved
-}
-
-// Keep a local copy of type before hide clears it
 function endNoteGame(success){
   var finishedType=noteGame.type;
   var finishedEnemy=noteGame.enemyRef;
@@ -578,7 +573,6 @@ function endNoteGame(success){
   else if(finishedType==='boss'){
     setLife(100);
     explodeBoss();
-    // note UI already fully hidden by hideNoteGameUI()
   }
 }
 
@@ -614,24 +608,18 @@ function triggerEncounter(type,enemyRef){
   startNoteGame(type,enemyRef);
 }
 
-// ---------- level complete ----------
 var completing=false;
 function fadeOutComplete(){
   if(completing) return; completing=true; frozen=true;
-  hideNoteGameUI(); // ensure any open note UI is gone
+  hideNoteGameUI();
   if(document.pointerLockElement) document.exitPointerLock();
   var f=document.getElementById('flash');
-  f.style.transition='opacity 1s';
-  f.style.background='#000';
-  f.style.opacity=1;
-  setTimeout(function(){
-    document.getElementById('levelcomplete').classList.remove('hidden');
-  },1000);
+  f.style.transition='opacity 1s'; f.style.background='#000'; f.style.opacity=1;
+  setTimeout(function(){ document.getElementById('levelcomplete').classList.remove('hidden'); },1000);
 }
 
 function gameOver(){ frozen=true; hideNoteGameUI(); document.getElementById('gameover').classList.remove('hidden'); }
 
-// ---------- main loop ----------
 function animate(){
   requestAnimationFrame(animate);
   var dt=Math.min(.05,clock.getDelta());
