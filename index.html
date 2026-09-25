@@ -42,14 +42,11 @@
             color: #ffd700; font-size: 48px; font-family: Arial, sans-serif; font-weight: bold;
             text-shadow: 0 0 20px #000; display: none; z-index: 35; text-align: center;
         }
-        /* ---- life bar ---- */
         #hud { position:absolute; top:0; left:0; padding:14px; padding-top:calc(14px + env(safe-area-inset-top,0px)); z-index:8; display:none; font-family:Arial,sans-serif; }
         #lifewrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #444; }
         #lifebar { height:100%; width:100%; background:#8fef8f; transition:width .3s,background .3s; }
         #lifelabel { font-size:.8rem; margin-top:4px; color:#ccc; }
-        /* ---- flash ---- */
         #flash { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:7; opacity:0; transition:opacity .12s; }
-        /* ---- note game ---- */
         #notegame { position:absolute; inset:0; z-index:25; display:none; flex-direction:column; align-items:center; justify-content:flex-end; background:rgba(0,0,0,.4); font-family:Arial,sans-serif; }
         #timerwrap { position:absolute; top:24px; right:24px; }
         #staffbox { background:rgba(15,12,10,.85); border-radius:14px; padding:14px; margin-bottom:8px; }
@@ -59,7 +56,6 @@
         .pkey.w { background:linear-gradient(180deg,#fdf9ee,#e8e0cc); border:1px solid #998; z-index:1; height:130px; }
         .pkey.b { background:linear-gradient(180deg,#222,#000); border:1px solid #000; z-index:2; height:82px; }
         .pkey:active { filter:brightness(.85); }
-        /* ---- game over ---- */
         #gameOverScreen {
             position:absolute; inset:0; z-index:40; display:none; flex-direction:column;
             align-items:center; justify-content:center; background:rgba(0,0,0,.9); color:#fff; font-family:Arial,sans-serif;
@@ -107,7 +103,6 @@
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // Easy maze for young kids
         const mazeWidth = 6;
         const mazeHeight = 6;
         const cellSize = 2.4;
@@ -136,16 +131,7 @@
         const doorHoverColor  = 0xff3333;
         const doorWidth = 1.0;
 
-        // Yellow door + Boss
-        let yellowDoor = null;
-        let yellowDoorMaterial = null;
-        let yellowDoorPanelMaterials = [];
-        let yellowDoorOpen = false;
-        let yellowDoorOpening = false;
-        let yellowDoorOpenStartTime = 0;
-        let isHoveringYellow = false;
-        const yellowDoorNormalColor = 0xdddd00;
-        const yellowDoorHoverColor  = 0xffff66;
+        // Boss (no yellow door)
         let boss = null;
         let bossSpawned = false;
         let levelComplete = false;
@@ -160,6 +146,7 @@
         const ENEMY_RADIUS = 0.25;
         const ENEMY_SLOW_SPEED = 0.022;
         const ENEMY_FAST_SPEED = 0.038;
+        const BOSS_LOOK_SPEED = 0.025;
         let gameFrozen = false;
         let touchingEnemy = null;
         let floorMatRef = null, ceilMatRef = null;
@@ -486,7 +473,7 @@
             }
         }
 
-        // -------------------- Maze generation – protect 2×2 start room --------------------
+        // -------------------- Maze generation --------------------
         function generateMaze() {
             maze = [];
             for (let x = 0; x < mazeWidth; x++) {
@@ -547,16 +534,11 @@
             }
         }
 
-        // -------------------- Door panels (facing the INSIDE of the room) --------------------
-        function addDoorPanels(parentGroup, width, height, thickness, isYellow = false) {
+        function addDoorPanels(parentGroup, width, height, thickness) {
             const panelMat = new THREE.MeshStandardMaterial({
-                color: isYellow ? 0x888800 : 0x550000,
-                roughness: 0.6,
-                transparent: true,
-                opacity: 1
+                color: 0x550000, roughness: 0.6, transparent: true, opacity: 1
             });
-            if (isYellow) yellowDoorPanelMaterials.push(panelMat);
-            else doorPanelMaterials.push(panelMat);
+            doorPanelMaterials.push(panelMat);
 
             const pw = width * 0.38;
             const ph = height * 0.38;
@@ -571,7 +553,6 @@
                     new THREE.BoxGeometry(thickness * 0.55, ph, pw),
                     panelMat
                 );
-                // Panels sit on the -X face of the door (toward the inside / boss)
                 panel.position.set(-thickness * 0.55, o.y, o.z);
                 parentGroup.add(panel);
             });
@@ -583,8 +564,6 @@
             walls = [];
             door = null; doorOpen = false; doorOpening = false; isHoveringDoor = false;
             doorPanelMaterials = [];
-            yellowDoor = null; yellowDoorOpen = false; yellowDoorOpening = false; isHoveringYellow = false;
-            yellowDoorPanelMaterials = [];
             boss = null; bossSpawned = false;
             enemies = []; gameFrozen = false; touchingEnemy = null;
             levelComplete = false; fadingToBlack = false;
@@ -612,27 +591,31 @@
                     if (cell.walls[0]) {
                         const w = new THREE.Mesh(new THREE.BoxGeometry(cellSize, wallHeight, wallThickness), wallMat);
                         w.position.set(x*cellSize + cellSize/2, wallHeight/2, z*cellSize);
+                        w.userData.isOuter = (z === 0);
                         w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
                     }
                     if (cell.walls[1]) {
                         const w = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, cellSize), wallMat);
                         w.position.set(x*cellSize + cellSize, wallHeight/2, z*cellSize + cellSize/2);
+                        w.userData.isOuter = (x === mazeWidth - 1);
                         w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
                     }
                     if (cell.walls[2]) {
                         const w = new THREE.Mesh(new THREE.BoxGeometry(cellSize, wallHeight, wallThickness), wallMat);
                         w.position.set(x*cellSize + cellSize/2, wallHeight/2, (z+1)*cellSize);
+                        w.userData.isOuter = (z === mazeHeight - 1);
                         w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
                     }
                     if (cell.walls[3]) {
                         const w = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, cellSize), wallMat);
                         w.position.set(x*cellSize, wallHeight/2, z*cellSize + cellSize/2);
+                        w.userData.isOuter = (x === 0);
                         w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
                     }
                 }
             }
 
-            // ----- Red door (only exit from 2×2 room) -----
+            // Red door
             door = new THREE.Group();
             doorMaterial = new THREE.MeshStandardMaterial({
                 color: doorNormalColor, roughness: 0.55, transparent: true, opacity: 1
@@ -642,7 +625,7 @@
                 doorMaterial
             );
             door.add(doorMain);
-            addDoorPanels(door, doorWidth, wallHeight, wallThickness, false);
+            addDoorPanels(door, doorWidth, wallHeight, wallThickness);
             door.position.set(2 * cellSize, wallHeight/2, 1 * cellSize + cellSize/2);
             scene.add(door);
 
@@ -650,9 +633,11 @@
             const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
             const s1 = new THREE.Mesh(sideGeo, wallMat);
             s1.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 - doorWidth/2 - sideW/2);
+            s1.userData.isOuter = false;
             scene.add(s1); walls.push(s1);
             const s2 = new THREE.Mesh(sideGeo, wallMat);
             s2.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 + doorWidth/2 + sideW/2);
+            s2.userData.isOuter = false;
             scene.add(s2); walls.push(s2);
 
             scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -699,8 +684,7 @@
 
             const yPos = isBoss ? radius + 0.05 : 1.0;
             group.position.set(x, yPos, z);
-            // Face into the maze (-X): local +Z → world -X when rotation.y = -π/2
-            const angle = isBoss ? -Math.PI / 2 : Math.random() * Math.PI * 2;
+            const angle = Math.random() * Math.PI * 2;
             group.rotation.y = angle;
             scene.add(group);
 
@@ -708,7 +692,8 @@
                 group, sphere, sphereMat: mat, faceGroup,
                 x, z, radius, facing: angle,
                 isChasing: false, wanderTimer: 0, turning: false, turnDir: 1,
-                dying: false, dieStart: 0, diePhase: 0, isBoss
+                dying: false, dieStart: 0, diePhase: 0, isBoss,
+                lookDir: Math.random() < 0.5 ? 1 : -1
             };
         }
 
@@ -745,87 +730,56 @@
             if (floorMatRef) { floorMatRef.color.setHex(floorColor); floorMatRef.emissive.setHex(0x000000); }
             if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
             bossAudio.pause();
-            themeAudio.volume = 0; themeAudio.play().catch(()=>{});
-            fadeInTheme();
         }
 
-        // Yellow door: same design as the red door, placed by replacing part of an existing wall
-        function spawnBossAndYellowDoor() {
+        // Remove all interior walls; keep only the outer boundary
+        function clearInteriorWalls() {
+            for (let i = walls.length - 1; i >= 0; i--) {
+                const w = walls[i];
+                if (!w.userData.isOuter) {
+                    scene.remove(w);
+                    walls.splice(i, 1);
+                }
+            }
+            // Remove red door (it was interior)
+            if (door) {
+                scene.remove(door);
+                door = null;
+                doorOpen = true;
+                doorOpening = false;
+                isHoveringDoor = false;
+            }
+            // Update maze data for minimap: only outer walls remain
+            for (let x = 0; x < mazeWidth; x++) {
+                for (let z = 0; z < mazeHeight; z++) {
+                    maze[x][z].walls = [false, false, false, false];
+                }
+            }
+            for (let x = 0; x < mazeWidth; x++) {
+                maze[x][0].walls[0] = true;
+                maze[x][mazeHeight - 1].walls[2] = true;
+            }
+            for (let z = 0; z < mazeHeight; z++) {
+                maze[0][z].walls[3] = true;
+                maze[mazeWidth - 1][z].walls[1] = true;
+            }
+        }
+
+        // After last roving enemy: clear interior, spawn boss in center
+        function spawnBossArena() {
             if (bossSpawned) return;
             bossSpawned = true;
 
-            // Find an existing east wall (prefer far half of the maze)
-            const candidates = [];
-            for (let x = Math.floor(mazeWidth / 2); x < mazeWidth - 1; x++) {
-                for (let z = 0; z < mazeHeight; z++) {
-                    if (maze[x][z].walls[1]) candidates.push({ x, z });
-                }
-            }
-            if (!candidates.length) {
-                for (let x = 0; x < mazeWidth - 1; x++) {
-                    for (let z = 0; z < mazeHeight; z++) {
-                        if (maze[x][z].walls[1]) candidates.push({ x, z });
-                    }
-                }
-            }
-            if (!candidates.length) return;
+            clearInteriorWalls();
+            enterBossPhase();
 
-            const pick = candidates[Math.floor(Math.random() * candidates.length)];
-            const doorCellX = pick.x;
-            const doorCellZ = pick.z;
-
-            // Same coordinate system as red door / east wall meshes
-            const doorX = (doorCellX + 1) * cellSize;
-            const doorZ = doorCellZ * cellSize + cellSize / 2;
-
-            // Erase the full existing wall mesh at this position
-            for (let i = walls.length - 1; i >= 0; i--) {
-                const w = walls[i];
-                if (Math.abs(w.position.x - doorX) < 0.15 &&
-                    Math.abs(w.position.z - doorZ) < 0.15) {
-                    scene.remove(w);
-                    walls.splice(i, 1);
-                    break;
-                }
-            }
-
-            // Open maze connectivity so the player can walk through after the door opens
-            maze[doorCellX][doorCellZ].walls[1] = false;
-            if (doorCellX + 1 < mazeWidth) {
-                maze[doorCellX + 1][doorCellZ].walls[3] = false;
-            }
-
-            // Yellow door – identical structure to the red door
-            yellowDoor = new THREE.Group();
-            yellowDoorMaterial = new THREE.MeshStandardMaterial({
-                color: yellowDoorNormalColor, roughness: 0.55, transparent: true, opacity: 1
-            });
-            const yMain = new THREE.Mesh(
-                new THREE.BoxGeometry(wallThickness, wallHeight, doorWidth),
-                yellowDoorMaterial
-            );
-            yellowDoor.add(yMain);
-            addDoorPanels(yellowDoor, doorWidth, wallHeight, wallThickness, true);
-            yellowDoor.position.set(doorX, wallHeight / 2, doorZ);
-            scene.add(yellowDoor);
-
-            // Side fillers (same purple wall material) so only the middle is the yellow door
-            const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
-            const sideW = (cellSize - doorWidth) / 2;
-            const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
-            const ys1 = new THREE.Mesh(sideGeo, wallMat);
-            ys1.position.set(doorX, wallHeight / 2, doorZ - doorWidth / 2 - sideW / 2);
-            scene.add(ys1); walls.push(ys1);
-            const ys2 = new THREE.Mesh(sideGeo, wallMat);
-            ys2.position.set(doorX, wallHeight / 2, doorZ + doorWidth / 2 + sideW / 2);
-            scene.add(ys2); walls.push(ys2);
-
-            // Boss stands in front of the door (inside the maze); face into maze, back to door
-            const bossX = doorX - 1.4;
-            const bossZ = doorZ;
+            const bossX = (mazeWidth * cellSize) / 2;
+            const bossZ = (mazeHeight * cellSize) / 2;
             boss = createEnemy(bossX, bossZ, true);
-            boss.facing = -Math.PI / 2;
+            boss.isChasing = false;
+            boss.facing = Math.random() * Math.PI * 2;
             boss.group.rotation.y = boss.facing;
+            boss.lookDir = Math.random() < 0.5 ? 1 : -1;
         }
 
         // -------------------- Collision / vision --------------------
@@ -836,9 +790,6 @@
             }
             if (!doorOpen && door) {
                 if (s.intersectsBox(new THREE.Box3().setFromObject(door))) return true;
-            }
-            if (!yellowDoorOpen && yellowDoor && bossSpawned) {
-                if (s.intersectsBox(new THREE.Box3().setFromObject(yellowDoor))) return true;
             }
             return false;
         }
@@ -882,10 +833,12 @@
         function canSeePlayer(e) {
             const dx = player.x - e.x, dz = player.z - e.z;
             const dist = Math.sqrt(dx*dx + dz*dz);
-            if (dist > 16 || dist < 0.15) return false;
+            if (dist > 30 || dist < 0.15) return false;
             const dirX = dx/dist, dirZ = dz/dist;
             const fx = Math.sin(e.facing), fz = Math.cos(e.facing);
-            if (fx*dirX + fz*dirZ < 0.82) return false;
+            // Boss uses a slightly wider FOV while scanning
+            const fovDot = e.isBoss ? 0.75 : 0.82;
+            if (fx*dirX + fz*dirZ < fovDot) return false;
             const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
             const direction = new THREE.Vector3(dirX, 0, dirZ).normalize();
             raycaster.set(origin, direction); raycaster.far = dist;
@@ -900,26 +853,11 @@
             raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
             return raycaster.intersectObject(door, true).length > 0;
         }
-        function isYellowDoorUnderCrosshair() {
-            if (!yellowDoor || yellowDoorOpen || yellowDoorOpening) return false;
-            if (boss && !boss.dying) return false;
-            raycaster.far = Infinity;
-            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-            return raycaster.intersectObject(yellowDoor, true).length > 0;
-        }
 
         function tryOpenDoor() {
             if (gameFrozen || levelComplete || noteGame.active) return;
             if (isDoorUnderCrosshair()) {
                 startNoteGame('door1', null);
-                return;
-            }
-            if (isYellowDoorUnderCrosshair()) {
-                playRedDoorVanish();
-                yellowDoorOpening = true;
-                yellowDoorOpenStartTime = performance.now();
-                fadingToBlack = true;
-                fadeStartTime = performance.now();
             }
         }
 
@@ -950,20 +888,37 @@
         function updateOneEnemy(e, dt) {
             if (e.dying) return false;
 
-            let shouldChase = false;
+            // ----- Boss: look around until it faces the player, then chase -----
             if (e.isBoss) {
-                const dist = Math.sqrt((player.x-e.x)**2 + (player.z-e.z)**2);
-                if (canSeePlayer(e) && dist < cellSize * 2.0) shouldChase = true;
-            } else {
-                shouldChase = canSeePlayer(e);
-            }
-            e.isChasing = shouldChase;
+                if (!e.isChasing) {
+                    e.facing += e.lookDir * BOSS_LOOK_SPEED;
+                    e.group.rotation.y = e.facing;
+                    e.group.position.set(e.x, e.radius + 0.05, e.z);
+                    if (canSeePlayer(e)) {
+                        e.isChasing = true;
+                    }
+                    return false;
+                }
+                // Chasing: move toward player
+                const speed = ENEMY_FAST_SPEED * 1.15;
+                const dx = player.x - e.x, dz = player.z - e.z;
+                const d = Math.sqrt(dx*dx + dz*dz) || 0.001;
+                const moveX = (dx/d)*speed, moveZ = (dz/d)*speed;
+                e.facing = Math.atan2(dx, dz);
 
-            if (e.isBoss && !shouldChase) {
-                e.group.position.set(e.x, e.radius+0.05, e.z);
+                let newX = e.x + moveX, newZ = e.z + moveZ;
+                if (!checkWallCollision(newX, e.z, e.radius)) e.x = newX;
+                if (!checkWallCollision(e.x, newZ, e.radius)) e.z = newZ;
+
+                e.x = Math.max(0.6, Math.min(mazeWidth*cellSize-0.6, e.x));
+                e.z = Math.max(0.6, Math.min(mazeHeight*cellSize-0.6, e.z));
+                e.group.position.set(e.x, e.radius + 0.05, e.z);
                 e.group.rotation.y = e.facing;
-                return false;
+                return true;
             }
+
+            // ----- Normal enemies -----
+            e.isChasing = canSeePlayer(e);
 
             const tooClose = !canSeeAhead(e, cellSize * 0.2);
             const corner = isFacingCorner(e);
@@ -976,7 +931,7 @@
                 e.facing += e.turnDir * 0.14;
                 if (canSeeAhead(e, cellSize) && !isFacingCorner(e)) e.turning = false;
                 e.group.rotation.y = e.facing;
-                e.group.position.set(e.x, e.isBoss ? e.radius+0.05 : 1.0, e.z);
+                e.group.position.set(e.x, 1.0, e.z);
                 return e.isChasing;
             }
 
@@ -1005,7 +960,7 @@
 
             e.x = Math.max(0.6, Math.min(mazeWidth*cellSize-0.6, e.x));
             e.z = Math.max(0.6, Math.min(mazeHeight*cellSize-0.6, e.z));
-            e.group.position.set(e.x, e.isBoss ? e.radius+0.05 : 1.0, e.z);
+            e.group.position.set(e.x, 1.0, e.z);
             e.group.rotation.y = e.facing;
             return e.isChasing;
         }
@@ -1040,11 +995,13 @@
                         if (e.isBoss) {
                             boss = null;
                             exitBossPhase();
+                            // Level complete after boss is defeated
+                            fadingToBlack = true;
+                            fadeStartTime = performance.now();
                         } else {
                             enemies = enemies.filter(en => en !== e);
                             if (enemies.length === 0 && !bossSpawned) {
-                                spawnBossAndYellowDoor();
-                                enterBossPhase();
+                                spawnBossArena();
                             } else {
                                 fadeInTheme();
                             }
@@ -1110,15 +1067,6 @@
                 }
             }
 
-            if (yellowDoorOpening && yellowDoor) {
-                const t = Math.min((now - yellowDoorOpenStartTime)/1000, 1);
-                yellowDoorMaterial.opacity = 1 - t;
-                yellowDoorPanelMaterials.forEach(m => m.opacity = 1 - t);
-                if (t >= 1) {
-                    yellowDoorOpening = false; yellowDoorOpen = true; yellowDoor.visible = false;
-                }
-            }
-
             if (fadingToBlack) {
                 const t = Math.min((now - fadeStartTime)/1000, 1);
                 document.getElementById('fadeOverlay').style.opacity = t;
@@ -1128,6 +1076,9 @@
                     document.getElementById('levelCompleteText').style.display = 'block';
                     document.exitPointerLock();
                     document.getElementById('crosshair').style.display = 'none';
+                    themeAudio.pause();
+                    bossAudio.pause();
+                    stopChaseMusic();
                 }
             }
 
@@ -1141,17 +1092,6 @@
                     } else if (!h && isHoveringDoor) {
                         doorMaterial.color.setHex(doorNormalColor);
                         isHoveringDoor = false;
-                    }
-                }
-                if (bossSpawned && (!boss || boss.dying) && !yellowDoorOpen && !yellowDoorOpening && yellowDoor) {
-                    const h = isYellowDoorUnderCrosshair();
-                    if (h && !isHoveringYellow) {
-                        yellowDoorMaterial.color.setHex(yellowDoorHoverColor);
-                        playRedDoorBeep();
-                        isHoveringYellow = true;
-                    } else if (!h && isHoveringYellow) {
-                        yellowDoorMaterial.color.setHex(yellowDoorNormalColor);
-                        isHoveringYellow = false;
                     }
                 }
             }
