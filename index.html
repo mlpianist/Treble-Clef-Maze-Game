@@ -242,11 +242,25 @@
         function startChaseMusic() {
             if (chaseMusicPlaying) return;
             chaseMusicPlaying = true;
+            // Stop theme while being chased
+            themeAudio.pause();
             playChaseMusicLoop();
         }
         function stopChaseMusic() {
             chaseMusicPlaying = false;
             if (chaseMusicTimer) { clearTimeout(chaseMusicTimer); chaseMusicTimer = null; }
+
+            // Resume theme only when appropriate
+            if (noteGame.active || levelComplete || life <= 0) return;
+            // Keep boss music during the boss phase
+            if (bossSpawned && boss && !boss.dying) return;
+            if (!bossAudio.paused) return;
+
+            if (themeAudio.paused) {
+                themeAudio.volume = 0;
+                themeAudio.play().catch(() => {});
+                fadeInTheme();
+            }
         }
 
         function playTouchChord() {
@@ -281,19 +295,40 @@
         }
 
         // -------------------- Background music --------------------
-        const themeAudio = new Audio('Theme Music.mp3'); themeAudio.loop = true; themeAudio.volume = 0.5;
-        const bossAudio = new Audio('Boss Music.mp3'); bossAudio.loop = true; bossAudio.volume = 0.5;
+        const themeAudio = new Audio('Theme Music.mp3');
+        themeAudio.volume = 0.5;
+        const bossAudio = new Audio('Boss Music.mp3');
+        bossAudio.volume = 0.5;
+
+        // Gapless looping: restart a little before the natural end
+        function enableSeamlessLoop(audio) {
+            audio.addEventListener('timeupdate', () => {
+                if (audio.duration && !audio.paused && audio.currentTime > audio.duration - 0.12) {
+                    audio.currentTime = 0.02;
+                }
+            });
+            audio.addEventListener('ended', () => {
+                audio.currentTime = 0.02;
+                audio.play().catch(() => {});
+            });
+        }
+        enableSeamlessLoop(themeAudio);
+        enableSeamlessLoop(bossAudio);
+
         function fadeAudio(el, to, ms) {
             const from = el.volume, start = performance.now();
             function step(t) {
-                const p = Math.min(1, (t-start)/ms);
-                el.volume = from + (to-from)*p;
+                const p = Math.min(1, (t - start) / ms);
+                el.volume = from + (to - from) * p;
                 if (p < 1) requestAnimationFrame(step);
             }
             requestAnimationFrame(step);
         }
         function duckTheme() { themeAudio.volume = 0; }
-        function fadeInTheme() { fadeAudio(themeAudio, 0.5, 1000); }
+        function fadeInTheme() {
+            if (themeAudio.paused) themeAudio.play().catch(() => {});
+            fadeAudio(themeAudio, 0.5, 1000);
+        }
 
         // -------------------- Life bar / flash --------------------
         let life = 100;
@@ -508,13 +543,7 @@
                     maze[x][z].walls[3] = false; maze[x-1][z].walls[1] = false;
                 }
             }
-
-            // Pre-open a wall slot for the future yellow door (east wall of cell 4,4)
-            // so no solid wall mesh is built there
-            if (mazeWidth > 4 && mazeHeight > 4) {
-                maze[4][4].walls[1] = false;
-                if (5 < mazeWidth) maze[5][4].walls[3] = false;
-            }
+            // Note: yellow door is NOT pre-opened – it will replace an existing wall when the boss spawns
         }
 
         // -------------------- Door panels (facing the INSIDE of the room) --------------------
@@ -719,48 +748,80 @@
             fadeInTheme();
         }
 
-        // Yellow door on a real wall + Boss in front of it
+        // Yellow door replaces an existing wall (no new side-filler walls created)
         function spawnBossAndYellowDoor() {
             if (bossSpawned) return;
             bossSpawned = true;
 
-            // Yellow door sits in the pre-opened east wall of cell (4,4)
-            const doorX = 5 * cellSize;               // east edge of cell 4
-            const doorZ = 4 * cellSize + cellSize/2;
+            // Prefer a solid east wall in the far half of the maze
+            const candidates = [];
+            for (let x = Math.floor(mazeWidth / 2); x < mazeWidth - 1; x++) {
+                for (let z = 0; z < mazeHeight; z++) {
+                    if (maze[x][z].walls[1]) candidates.push({ x, z });
+                }
+            }
+            // Fallback: any east wall
+            if (!candidates.length) {
+                for (let x = 0; x < mazeWidth - 1; x++) {
+                    for (let z = 0; z < mazeHeight; z++) {
+                        if (maze[x][z].walls[1]) candidates.push({ x, z });
+                    }
+                }
+            }
+            if (!candidates.length) return; // extremely unlikely
 
+            const pick = candidates[Math.floor(Math.random() * candidates.length)];
+            const doorCellX = pick.x;
+            const doorCellZ = pick.z;
+
+            const doorX = (doorCellX + 1) * cellSize;               // east edge of the cell
+            const doorZ = doorCellZ * cellSize + cellSize / 2;
+
+            // Remove the existing wall mesh at this position
+            for (let i = walls.length - 1; i >= 0; i--) {
+                const w = walls[i];
+                if (Math.abs(w.position.x - doorX) < 0.15 &&
+                    Math.abs(w.position.z - doorZ) < 0.15) {
+                    scene.remove(w);
+                    walls.splice(i, 1);
+                    break;
+                }
+            }
+
+            // Open maze connectivity so the player can walk through after the door opens
+            maze[doorCellX][doorCellZ].walls[1] = false;
+            if (doorCellX + 1 < mazeWidth) {
+                maze[doorCellX + 1][doorCellZ].walls[3] = false;
+            }
+
+            // Yellow door – full cell width, so no side fillers are needed
             yellowDoor = new THREE.Group();
             yellowDoorMaterial = new THREE.MeshStandardMaterial({
                 color: 0xdddd00, roughness: 0.5, transparent: true, opacity: 1, side: THREE.FrontSide
             });
             const yMain = new THREE.Mesh(
-                new THREE.PlaneGeometry(doorWidth * 1.1, wallHeight),
+                new THREE.PlaneGeometry(cellSize * 0.98, wallHeight),
                 yellowDoorMaterial
             );
-            yMain.rotation.y = -Math.PI/2; // normal faces -X, the side the boss stands on
+            yMain.rotation.y = -Math.PI / 2; // faces into the maze (-X)
             yellowDoor.add(yMain);
+
             const yBackMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
-            const yBack = new THREE.Mesh(new THREE.PlaneGeometry(doorWidth * 1.1, wallHeight), yBackMat);
-            yBack.rotation.y = Math.PI/2; // normal faces +X, the outside/exterior side
+            const yBack = new THREE.Mesh(
+                new THREE.PlaneGeometry(cellSize * 0.98, wallHeight),
+                yBackMat
+            );
+            yBack.rotation.y = Math.PI / 2;
             yellowDoor.add(yBack);
-            yellowDoor.position.set(doorX, wallHeight/2, doorZ);
+
+            yellowDoor.position.set(doorX, wallHeight / 2, doorZ);
             scene.add(yellowDoor);
 
-            // Side fillers for the yellow door (same wall)
-            const sideW = (cellSize - doorWidth*1.1) / 2;
-            const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
-            const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
-            const ys1 = new THREE.Mesh(sideGeo, wallMat);
-            ys1.position.set(doorX, wallHeight/2, doorZ - doorWidth*1.1/2 - sideW/2);
-            scene.add(ys1); walls.push(ys1);
-            const ys2 = new THREE.Mesh(sideGeo, wallMat);
-            ys2.position.set(doorX, wallHeight/2, doorZ + doorWidth*1.1/2 + sideW/2);
-            scene.add(ys2); walls.push(ys2);
-
-            // Boss stands in front of the door (inside the maze), door behind it
+            // Boss stands in front of the door (inside the maze)
             const bossX = doorX - 1.4;
             const bossZ = doorZ;
             boss = createEnemy(bossX, bossZ, true);
-            boss.facing = Math.PI; // face toward -X, into the maze
+            boss.facing = Math.PI; // face toward -X
             boss.group.rotation.y = boss.facing;
         }
 
@@ -1047,7 +1108,7 @@
                 }
             }
 
-            // Yellow door + panels fade together
+            // Yellow door fade
             if (yellowDoorOpening && yellowDoor) {
                 const t = Math.min((now - yellowDoorOpenStartTime)/1000, 1);
                 yellowDoorMaterial.opacity = 1 - t;
