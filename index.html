@@ -1,567 +1,1164 @@
 <!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Maze of Notes</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
-<style>
-:root{--good:#3fdc6a;--bad:#e0453c}
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#050505;color:#eee;font-family:Inter,Arial,sans-serif;overflow:hidden;height:100vh}
-#c{position:fixed;inset:0}
-.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.88);z-index:20;text-align:center}
-.hidden{display:none!important}
-h1{font-size:2.2rem;margin-bottom:18px}
-button{font-size:1.1rem;padding:12px 30px;border-radius:8px;border:none;background:#3fa9dc;color:#fff;cursor:pointer;margin-top:14px}
-button:hover{background:#59bcee}
-#hud{position:fixed;top:0;left:0;padding:14px;padding-top:calc(14px + env(safe-area-inset-top,0px));z-index:10}
-#lifewrap{width:240px;height:22px;background:#222;border-radius:11px;overflow:hidden;border:1px solid #444}
-#lifebar{height:100%;width:100%;background:#8fef8f;transition:width .3s,background .3s}
-#lifelabel{font-size:.8rem;margin-top:4px;color:#ccc}
-#centertext{position:fixed;top:14%;left:0;right:0;text-align:center;font-size:1.6rem;z-index:9;text-shadow:0 2px 8px #000;transition:opacity 1s;pointer-events:none}
-#flash{position:fixed;inset:0;pointer-events:none;z-index:8;opacity:0;transition:opacity .12s}
-#crosshair{position:fixed;top:50%;left:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:#fff;opacity:.85;z-index:11;pointer-events:none}
-#minimap{position:fixed;left:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));border:2px solid #6a8dff;border-radius:8px;background:#0a0a16;z-index:10}
-#notegame{position:fixed;inset:0;z-index:15;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;background:rgba(0,0,0,.35)}
-#timerwrap{position:absolute;top:24px;right:24px}
-#staffbox{background:rgba(15,12,10,.85);border-radius:14px;padding:14px;margin-bottom:8px}
-#pianowrap{background:rgba(15,12,10,.85);border-radius:14px 14px 0 0;padding:10px 10px 20px;margin-bottom:0;overflow-x:auto}
-#piano{position:relative;height:130px}
-.pkey{position:absolute;top:0;border-radius:0 0 4px 4px;cursor:pointer}
-.pkey.w{background:linear-gradient(180deg,#fdf9ee,#e8e0cc);border:1px solid #998;z-index:1;height:130px}
-.pkey.b{background:linear-gradient(180deg,#222,#000);border:1px solid #000;z-index:2;height:82px}
-.pkey:active{filter:brightness(.85)}
-</style></head>
+<html>
+<head>
+    <title>Simple 3D Maze Game – Level 1</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+        #startScreen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 10;
+            color: #fff; font-family: Arial, sans-serif;
+        }
+        #startButton {
+            padding: 18px 36px; font-size: 22px; cursor: pointer;
+            background: #800080; color: #fff; border: none; border-radius: 6px; margin-bottom: 20px;
+        }
+        #startButton:hover { background: #9b30a0; }
+        #startInstructions { font-size: 16px; text-align: center; line-height: 1.6; color: #ccc; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            width: 20px; height: 20px; pointer-events: none; z-index: 5; display: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: ''; position: absolute; background: rgba(255,255,255,0.85);
+        }
+        #crosshair::before { left: 9px; top: 0; width: 2px; height: 20px; }
+        #crosshair::after  { left: 0; top: 9px; width: 20px; height: 2px; }
+        #minimapCanvas {
+            position: absolute; bottom: 20px; left: 20px; width: 160px; height: 160px;
+            background: rgba(0,0,0,0.75); border: 2px solid #e6d8ad; border-radius: 6px;
+            z-index: 6; display: none;
+        }
+        #fadeOverlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; opacity: 0; pointer-events: none; z-index: 30;
+        }
+        #levelCompleteText {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: #ffd700; font-size: 48px; font-family: Arial, sans-serif; font-weight: bold;
+            text-shadow: 0 0 20px #000; display: none; z-index: 35; text-align: center;
+        }
+        /* ---- life bar ---- */
+        #hud { position:absolute; top:0; left:0; padding:14px; padding-top:calc(14px + env(safe-area-inset-top,0px)); z-index:8; display:none; font-family:Arial,sans-serif; }
+        #lifewrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #444; }
+        #lifebar { height:100%; width:100%; background:#8fef8f; transition:width .3s,background .3s; }
+        #lifelabel { font-size:.8rem; margin-top:4px; color:#ccc; }
+        /* ---- flash ---- */
+        #flash { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:7; opacity:0; transition:opacity .12s; }
+        /* ---- note game ---- */
+        #notegame { position:absolute; inset:0; z-index:25; display:none; flex-direction:column; align-items:center; justify-content:flex-end; background:rgba(0,0,0,.4); font-family:Arial,sans-serif; }
+        #timerwrap { position:absolute; top:24px; right:24px; }
+        #staffbox { background:rgba(15,12,10,.85); border-radius:14px; padding:14px; margin-bottom:8px; }
+        #pianowrap { background:rgba(15,12,10,.85); border-radius:14px 14px 0 0; padding:10px 10px 20px; overflow-x:auto; }
+        #piano { position:relative; height:130px; }
+        .pkey { position:absolute; top:0; border-radius:0 0 4px 4px; cursor:pointer; }
+        .pkey.w { background:linear-gradient(180deg,#fdf9ee,#e8e0cc); border:1px solid #998; z-index:1; height:130px; }
+        .pkey.b { background:linear-gradient(180deg,#222,#000); border:1px solid #000; z-index:2; height:82px; }
+        .pkey:active { filter:brightness(.85); }
+        /* ---- game over ---- */
+        #gameOverScreen {
+            position:absolute; inset:0; z-index:40; display:none; flex-direction:column;
+            align-items:center; justify-content:center; background:rgba(0,0,0,.9); color:#fff; font-family:Arial,sans-serif;
+        }
+        #gameOverScreen h1 { font-size:2.4rem; margin-bottom:20px; }
+        #returnHomeButton { padding:14px 32px; font-size:20px; cursor:pointer; background:#800080; color:#fff; border:none; border-radius:6px; }
+        #returnHomeButton:hover { background:#9b30a0; }
+    </style>
+</head>
 <body>
-<canvas id="c"></canvas>
-<div id="flash"></div>
-<div id="hud" class="hidden"><div id="lifewrap"><div id="lifebar"></div></div><div id="lifelabel">Life 100/100</div></div>
-<div id="crosshair" class="hidden"></div>
-<canvas id="minimap" width="150" height="150" class="hidden"></canvas>
-<div id="centertext"></div>
+    <div id="startScreen">
+        <button id="startButton">Start Game</button>
+        <div id="startInstructions">
+            Click to lock cursor<br>
+            Press Esc to unlock cursor<br>
+            WASD / Arrow keys to move<br>
+            Look at the red door and click to open it<br>
+            Avoid the angry red spheres!<br>
+            Minimap is in the lower-left corner
+        </div>
+    </div>
 
-<div id="home" class="screen"><h1>Maze of Notes</h1><p>Navigate a maze, read the staff, defeat every foe.</p><button id="startBtn">Start</button></div>
-<div id="gameover" class="screen hidden"><h1>Game Over</h1><button id="homeBtn2">Return Home</button></div>
-<div id="levelcomplete" class="screen hidden"><h1>Level 1 Complete</h1></div>
+    <div id="hud"><div id="lifewrap"><div id="lifebar"></div></div><div id="lifelabel">Life 100/100</div></div>
+    <div id="crosshair"></div>
+    <canvas id="minimapCanvas" width="160" height="160"></canvas>
+    <div id="flash"></div>
+    <div id="fadeOverlay"></div>
+    <div id="levelCompleteText">Level 1 Complete!</div>
 
-<div id="notegame" class="hidden">
-  <svg id="timerwrap" width="70" height="70"><circle cx="35" cy="35" r="30" stroke="#333" stroke-width="6" fill="none"/><circle id="timerring" cx="35" cy="35" r="30" stroke="#3fa9dc" stroke-width="6" fill="none" stroke-dasharray="188" stroke-dashoffset="0" transform="rotate(-90 35 35)"/></svg>
-  <div id="staffbox"><div id="staffsvg"></div></div>
-  <div id="pianowrap"><div id="piano"></div></div>
-</div>
+    <div id="notegame">
+      <svg id="timerwrap" width="70" height="70"><circle cx="35" cy="35" r="30" stroke="#333" stroke-width="6" fill="none"/><circle id="timerring" cx="35" cy="35" r="30" stroke="#3fa9dc" stroke-width="6" fill="none" stroke-dasharray="188" stroke-dashoffset="0" transform="rotate(-90 35 35)"/></svg>
+      <div id="staffbox"><div id="staffsvg"></div></div>
+      <div id="pianowrap"><div id="piano"></div></div>
+    </div>
 
-<script>
-(function(){
-"use strict";
-var VF=Vex.Flow;
-var scene,camera,renderer,clock=new THREE.Clock();
-var walls=[]; // {minX,maxX,minZ,maxZ}
-var CS=4, R=3, C=4, ROOMZ=4; // maze rows/cols, cell size — kept small for young players
-var entranceCol=Math.floor(C/2);
-var grid=[];
-var theta=0, pos=new THREE.Vector3(0,1.6,2);
-var keys={};
-var enemies=[], boss=null, bossLight=null, defeated=0, bossActive=false, bossDoor=null, bossDoorCell=null;
-var redDoor, redDoorOpen=false, redDoorMesh=null;
-var frozen=true; // frozen until game starts / during note games
-var raycaster=new THREE.Raycaster(), mouseNDC=new THREE.Vector2();
-var hoverDoor=null;
+    <div id="gameOverScreen"><h1>Game Over</h1><button id="returnHomeButton">Return Home</button></div>
 
-// ---------- audio ----------
-var actx=null;
-function ac(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); return actx; }
-function tone(freq,dur,type){ var a=ac(); var o=a.createOscillator(),g=a.createGain(); o.type=type||'sine'; o.frequency.setValueAtTime(freq,a.currentTime); g.gain.setValueAtTime(.22,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+dur); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur); }
-function sfxWrong(){ var a=ac(),o=a.createOscillator(),g=a.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(500,a.currentTime); o.frequency.exponentialRampToValueAtTime(120,a.currentTime+.6); g.gain.setValueAtTime(.18,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+.6); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+.6); }
-function sfxWin(){ [523.25,659.25,783.99,1046.5].forEach(function(f,i){ setTimeout(function(){tone(f,.35,'triangle');},i*90); }); }
-function sfxExplosion(){
-  var a=ac(); var len=a.sampleRate*.5;
-  var buf=a.createBuffer(1,len,a.sampleRate), data=buf.getChannelData(0);
-  for(var i=0;i<len;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);
-  var noise=a.createBufferSource(); noise.buffer=buf;
-  var filt=a.createBiquadFilter(); filt.type='lowpass'; filt.frequency.setValueAtTime(1400,a.currentTime); filt.frequency.exponentialRampToValueAtTime(70,a.currentTime+.5);
-  var g=a.createGain(); g.gain.setValueAtTime(.5,a.currentTime); g.gain.exponentialRampToValueAtTime(.01,a.currentTime+.5);
-  noise.connect(filt); filt.connect(g); g.connect(a.destination);
-  noise.start(); noise.stop(a.currentTime+.5);
-}
+    <script>
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0xc8d0e0, 18, 40);
 
-var FREQ={C4:261.63,'C#4':277.18,D4:293.66,'D#4':311.13,E4:329.63,F4:349.23,'F#4':369.99,G4:392,'G#4':415.3,A4:440,'A#4':466.16,B4:493.88,C5:523.25,'C#5':554.37,D5:587.33,'D#5':622.25,E5:659.25,F5:698.46,'F#5':739.99,G5:783.99};
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
 
-// ---------- three setup ----------
-function initThree(){
-  scene=new THREE.Scene(); scene.background=new THREE.Color(0x060606); scene.fog=new THREE.Fog(0x060606,4,34);
-  camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,0.1,200);
-  camera.rotation.order='YXZ';
-  renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true}); renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-  scene.add(new THREE.AmbientLight(0x556677,.7));
-  var pl=new THREE.PointLight(0xffe9c0,.9,40); pl.position.set(0,4,0); scene.add(pl);
-  window.addEventListener('resize',function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
-}
+        // Easy maze for young kids
+        const mazeWidth = 6;
+        const mazeHeight = 6;
+        const cellSize = 2.4;
+        const wallHeight = 2.2;
+        const wallThickness = 0.12;
 
-function addWall(x0,z0,x1,z1){
-  var len=Math.hypot(x1-x0,z1-z0), H=4, T=.3;
-  var m=new THREE.Mesh(new THREE.BoxGeometry(len+T,H,T),new THREE.MeshStandardMaterial({color:0x3a63c9,roughness:.85}));
-  m.position.set((x0+x1)/2,H/2,(z0+z1)/2);
-  m.rotation.y=Math.atan2(z1-z0,x1-x0);
-  scene.add(m);
-  var hx=(len+T)/2, hz=T/2+.05, cos=Math.cos(m.rotation.y), sin=Math.sin(m.rotation.y);
-  var ax=Math.abs(cos)*hx+Math.abs(sin)*hz, az=Math.abs(sin)*hx+Math.abs(cos)*hz;
-  var wallObj={minX:m.position.x-ax,maxX:m.position.x+ax,minZ:m.position.z-az,maxZ:m.position.z+az,mesh:m};
-  walls.push(wallObj);
-  return wallObj;
-}
+        const player = { x: 2.4, z: 2.4, speed: 0.12, radius: 0.28 };
+        camera.position.set(player.x, 1.1, player.z);
+        camera.rotation.order = 'YXZ';
 
-function buildRoom(){
-  var g=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0x6a3fc9}));
-  g.rotation.x=-Math.PI/2; scene.add(g);
-  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0xaee3ff}));
-  ceil.rotation.x=Math.PI/2; ceil.position.y=4; scene.add(ceil);
-  var half=3, dh=1.15;
-  addWall(-half,-half,-dh,-half); // north-left of doorway
-  addWall(dh,-half,half,-half); // north-right of doorway
-  addWall(-half,half,half,half); // south
-  addWall(-half,-half,-half,half); // west
-  addWall(half,-half,half,half); // east
-  // red door fills the north doorway gap
-  var doorMat=new THREE.MeshStandardMaterial({color:0xb5271f,emissive:0x220000,emissiveIntensity:.4,roughness:.5});
-  redDoorMesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
-  redDoorMesh.position.set(0,1.7,-half);
-  scene.add(redDoorMesh);
-  var doorWall={minX:-dh,maxX:dh,minZ:-half-.2,maxZ:-half+.2};
-  walls.push(doorWall);
-  redDoor={mesh:redDoorMesh,mat:doorMat,wallObj:doorWall};
-}
+        let yaw = 0, pitch = 0;
+        const mouseSensitivity = 0.002;
 
-function genMaze(){
-  for(var i=0;i<R;i++){ grid[i]=[]; for(var j=0;j<C;j++) grid[i][j]={N:true,S:true,E:true,W:true,v:false}; }
-  var stack=[[0,entranceCol]]; grid[0][entranceCol].v=true;
-  while(stack.length){
-    var cur=stack[stack.length-1], i=cur[0], j=cur[1];
-    var nbrs=[];
-    if(i>0&&!grid[i-1][j].v) nbrs.push(['N',i-1,j]);
-    if(i<R-1&&!grid[i+1][j].v) nbrs.push(['S',i+1,j]);
-    if(j>0&&!grid[i][j-1].v) nbrs.push(['W',i,j-1]);
-    if(j<C-1&&!grid[i][j+1].v) nbrs.push(['E',i,j+1]);
-    if(!nbrs.length){ stack.pop(); continue; }
-    var pick=nbrs[Math.floor(Math.random()*nbrs.length)];
-    var dir=pick[0],ni=pick[1],nj=pick[2];
-    if(dir==='N'){grid[i][j].N=false;grid[ni][nj].S=false;}
-    if(dir==='S'){grid[i][j].S=false;grid[ni][nj].N=false;}
-    if(dir==='W'){grid[i][j].W=false;grid[ni][nj].E=false;}
-    if(dir==='E'){grid[i][j].E=false;grid[ni][nj].W=false;}
-    grid[ni][nj].v=true; stack.push([ni,nj]);
-  }
-}
+        let maze = [];
+        let walls = [];
 
-function cellX(j){ return (j-entranceCol)*CS; }
-function cellZ(i){ return -ROOMZ-3-i*CS; }
+        // Red door
+        let door = null;
+        let doorMaterial = null;
+        let doorPanelMaterials = [];
+        let doorOpen = false;
+        let doorOpening = false;
+        let doorOpenStartTime = 0;
+        let isHoveringDoor = false;
+        const doorNormalColor = 0xcc0000;
+        const doorHoverColor  = 0xff3333;
+        const doorWidth = 1.0;
 
-function buildMazeMesh(){
-  var half=CS/2;
-  var g=new THREE.Mesh(new THREE.PlaneGeometry(C*CS+4,R*CS+ROOMZ+8),new THREE.MeshStandardMaterial({color:0x6a3fc9}));
-  g.rotation.x=-Math.PI/2; g.position.set(0,-0.001,cellZ(R/2)); scene.add(g);
-  var ceil=new THREE.Mesh(new THREE.PlaneGeometry(C*CS+4,R*CS+ROOMZ+8),new THREE.MeshStandardMaterial({color:0xaee3ff}));
-  ceil.rotation.x=Math.PI/2; ceil.position.set(0,4,cellZ(R/2)); scene.add(ceil);
-  computeMapBounds();
-  for(var i=0;i<R;i++) for(var j=0;j<C;j++){
-    var cx=cellX(j), cz=cellZ(i);
-    var cell=grid[i][j];
-    if(cell.N && !(i===0 && j===entranceCol)) addWall(cx-half,cz-half,cx+half,cz-half);
-    if(cell.S) addWall(cx-half,cz+half,cx+half,cz+half);
-    if(cell.W) addWall(cx-half,cz-half,cx-half,cz+half);
-    if(cell.E) addWall(cx+half,cz-half,cx+half,cz+half);
-  }
-}
+        // Yellow door + Boss
+        let yellowDoor = null;
+        let yellowDoorMaterial = null;
+        let yellowDoorPanelMaterials = [];
+        let yellowDoorOpen = false;
+        let yellowDoorOpening = false;
+        let yellowDoorOpenStartTime = 0;
+        let isHoveringYellow = false;
+        let boss = null;
+        let bossSpawned = false;
+        let levelComplete = false;
+        let fadeStartTime = 0;
+        let fadingToBlack = false;
 
-// ---------- enemies ----------
-function makeSphere(radius,color){
-  var m=new THREE.Mesh(new THREE.SphereGeometry(radius,20,16),new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:.6,roughness:.4}));
-  scene.add(m); return m;
-}
-function randCell(){ return [1+Math.floor(Math.random()*(R-1)), Math.floor(Math.random()*C)]; }
-function spawnEnemies(){
-  for(var k=0;k<8;k++){
-    var rc=randCell();
-    var s=makeSphere(.5,0xdd2020);
-    s.position.set(cellX(rc[1])+(Math.random()-.5)*2,1.4,cellZ(rc[0])+(Math.random()-.5)*2);
-    enemies.push({mesh:s,alive:true,wanderT:new THREE.Vector3().copy(s.position),chase:false,dead:false});
-  }
-}
-function pickFarCell(){
-  var i=R-1, bestJ=0, bd=-1;
-  for(var j=0;j<C;j++){ var d=Math.abs(j-entranceCol); if(d>bd){bd=d;bestJ=j;} }
-  return [i,bestJ];
-}
-function spawnBoss(){
-  bossDoorCell=pickFarCell();
-  var i=bossDoorCell[0],j=bossDoorCell[1],half=CS/2,cx=cellX(j),cz=cellZ(i),dh=1.15;
-  // remove the S outer wall of that cell (mesh + collider) and replace with yellow door
-  for(var w=walls.length-1;w>=0;w--){
-    var wl=walls[w];
-    var cxw=(wl.minX+wl.maxX)/2, czw=(wl.minZ+wl.maxZ)/2;
-    if(Math.abs(cxw-cx)<half+.2 && Math.abs(czw-(cz+half))<.5){ if(wl.mesh) scene.remove(wl.mesh); walls.splice(w,1); }
-  }
-  var doorMat=new THREE.MeshStandardMaterial({color:0xd8b41a,emissive:0x332200,emissiveIntensity:.4,roughness:.5});
-  var dmesh=new THREE.Mesh(new THREE.BoxGeometry(dh*2,3.4,.3),doorMat);
-  dmesh.position.set(cx,1.7,cz+half);
-  scene.add(dmesh);
-  var doorWall={minX:cx-dh,maxX:cx+dh,minZ:cz+half-.2,maxZ:cz+half+.2};
-  walls.push(doorWall);
-  bossDoor={mesh:dmesh,mat:doorMat,open:false,cell:[i,j],wallObj:doorWall};
-  boss=makeSphere(1.7,0xff1414);
-  boss.material.emissiveIntensity=1;
-  boss.position.set(cx,2,cz-1.5);
-  bossLight=new THREE.PointLight(0xff2222,2.2,16);
-  scene.add(bossLight);
-}
+        const wallColor = 0x800080;
+        const floorColor = 0x0000ff;
+        const ceilingColor = 0xadd8e6;
 
-// ---------- minimap ----------
-var mapCanvas=document.getElementById('minimap'), mapCtx=mapCanvas.getContext('2d'), mapBounds=null;
-function computeMapBounds(){
-  var half=3;
-  var minX=Math.min(-half,cellX(0)-CS/2), maxX=Math.max(half,cellX(C-1)+CS/2);
-  var minZ=cellZ(R-1)-CS/2, maxZ=half;
-  mapBounds={minX:minX,maxX:maxX,minZ:minZ,maxZ:maxZ};
-}
-function drawMinimap(){
-  if(!mapBounds) return;
-  var w=mapCanvas.width,h=mapCanvas.height;
-  mapCtx.clearRect(0,0,w,h);
-  var sx=w/(mapBounds.maxX-mapBounds.minX), sz=h/(mapBounds.maxZ-mapBounds.minZ);
-  function px(x){return (x-mapBounds.minX)*sx;}
-  function pz(z){return (z-mapBounds.minZ)*sz;}
-  mapCtx.fillStyle='#6a8dff';
-  walls.forEach(function(wl){
-    var x1=px(wl.minX),x2=px(wl.maxX),y1=pz(wl.minZ),y2=pz(wl.maxZ);
-    mapCtx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.max(2,Math.abs(x2-x1)),Math.max(2,Math.abs(y2-y1)));
-  });
-  enemies.forEach(function(e){
-    if(!e.alive) return;
-    mapCtx.fillStyle=e.chase?'#ff5050':'#ff9a9a';
-    mapCtx.beginPath(); mapCtx.arc(px(e.mesh.position.x),pz(e.mesh.position.z),3,0,7); mapCtx.fill();
-  });
-  if(boss && !boss.dead && bossActive){
-    mapCtx.fillStyle='#ffce33';
-    mapCtx.beginPath(); mapCtx.arc(px(boss.position.x),pz(boss.position.z),5,0,7); mapCtx.fill();
-  }
-  var pxp=px(pos.x), pzp=pz(pos.z);
-  mapCtx.strokeStyle='#fff'; mapCtx.lineWidth=2;
-  mapCtx.beginPath(); mapCtx.moveTo(pxp,pzp); mapCtx.lineTo(pxp-Math.sin(theta)*9,pzp-Math.cos(theta)*9); mapCtx.stroke();
-  mapCtx.fillStyle='#fff';
-  mapCtx.beginPath(); mapCtx.arc(pxp,pzp,3.5,0,7); mapCtx.fill();
-}
+        let enemies = [];
+        const ENEMY_RADIUS = 0.25;
+        const ENEMY_SLOW_SPEED = 0.022;
+        const ENEMY_FAST_SPEED = 0.038;
+        let gameFrozen = false;
+        let touchingEnemy = null;
+        let floorMatRef = null, ceilMatRef = null;
 
-// ---------- movement / collision ----------
-function tryMove(nx,nz,rad){
-  rad=rad||.32;
-  for(var k=0;k<walls.length;k++){ var w=walls[k];
-    var cx=Math.max(w.minX,Math.min(nx,w.maxX));
-    var cz=Math.max(w.minZ,Math.min(nz,w.maxZ));
-    var dx=nx-cx, dz=nz-cz;
-    if(dx*dx+dz*dz<rad*rad) return false;
-  }
-  return true;
-}
-var pitch=0, mouseSens=0.0022;
-function updatePlayer(dt){
-  var turn=2.2*dt, spd=5*dt;
-  if(keys.ArrowLeft) theta+=turn;
-  if(keys.ArrowRight) theta-=turn;
-  var fx=-Math.sin(theta), fz=-Math.cos(theta);
-  var mv=0; if(keys.ArrowUp) mv=1; if(keys.ArrowDown) mv=-1;
-  if(mv){
-    var nx=pos.x+fx*spd*mv, nz=pos.z+fz*spd*mv;
-    if(tryMove(nx,pos.z)) pos.x=nx;
-    if(tryMove(pos.x,nz)) pos.z=nz;
-  }
-  camera.position.copy(pos); camera.rotation.set(pitch,theta,0);
-}
+        // -------------------- Audio --------------------
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-// ---------- enemy AI ----------
-var chasingEnemy=null, levelWon=false;
-function updateEnemies(dt){
-  enemies.forEach(function(e){
-    if(!e.alive) return;
-    var d=e.mesh.position.distanceTo(pos);
-    if(!e.chase && d<9 && chasingEnemy===null){ e.chase=true; chasingEnemy=e; }
-    if(e.chase){
-      var t=performance.now();
-      e.mesh.material.emissive.setHex(Math.floor(t/130)%2? 0xff0000:0xffffff);
-      var dir=new THREE.Vector3().subVectors(pos,e.mesh.position); dir.y=0; dir.normalize();
-      var nx=e.mesh.position.x+dir.x*3.2*dt, nz=e.mesh.position.z+dir.z*3.2*dt;
-      if(tryMove(nx,e.mesh.position.z,.4)) e.mesh.position.x=nx;
-      if(tryMove(e.mesh.position.x,nz,.4)) e.mesh.position.z=nz;
-    } else {
-      var dir2=new THREE.Vector3().subVectors(e.wanderT,e.mesh.position); dir2.y=0;
-      if(dir2.length()<.3){
-        var rc, tries=0, tooClose;
-        do{
-          rc=randCell(); tooClose=false;
-          for(var m=0;m<enemies.length;m++){
-            var other=enemies[m]; if(other===e || !other.alive) continue;
-            var ddx=cellX(rc[1])-other.mesh.position.x, ddz=cellZ(rc[0])-other.mesh.position.z;
-            if(ddx*ddx+ddz*ddz<CS*CS){ tooClose=true; break; }
-          }
-          tries++;
-        } while(tooClose && tries<6);
-        e.wanderT.set(cellX(rc[1]),1.4,cellZ(rc[0]));
-      }
-      else { dir2.normalize(); var nx2=e.mesh.position.x+dir2.x*1*dt, nz2=e.mesh.position.z+dir2.z*1*dt; if(tryMove(nx2,e.mesh.position.z,.4)) e.mesh.position.x=nx2; if(tryMove(e.mesh.position.x,nz2,.4)) e.mesh.position.z=nz2; }
-    }
-    if(d<1.3 && !noteGame.active && !levelWon) triggerEncounter('enemy',e);
-  });
-  // keep enemies from clumping together
-  for(var a=0;a<enemies.length;a++){
-    var ea=enemies[a]; if(!ea.alive) continue;
-    var push=new THREE.Vector3();
-    for(var b=0;b<enemies.length;b++){
-      if(a===b) continue; var eb=enemies[b]; if(!eb.alive) continue;
-      var dd=ea.mesh.position.distanceTo(eb.mesh.position);
-      if(dd>0 && dd<1.6){ var away=new THREE.Vector3().subVectors(ea.mesh.position,eb.mesh.position); away.y=0; away.normalize(); push.add(away.multiplyScalar((1.6-dd)/1.6)); }
-    }
-    if(push.lengthSq()>0){
-      var pnx=ea.mesh.position.x+push.x*dt*2, pnz=ea.mesh.position.z+push.z*dt*2;
-      if(tryMove(pnx,ea.mesh.position.z,.4)) ea.mesh.position.x=pnx;
-      if(tryMove(ea.mesh.position.x,pnz,.4)) ea.mesh.position.z=pnz;
-    }
-  }
-  if(boss && !boss.dead){
-    var db=boss.position.distanceTo(pos);
-    if(db<14){
-      var t2=performance.now(); boss.material.emissive.setHex(Math.floor(t2/130)%2?0xff0000:0xffcccc);
-      var dir3=new THREE.Vector3().subVectors(pos,boss.position); dir3.y=0; dir3.normalize();
-      var nx3=boss.position.x+dir3.x*2.4*dt, nz3=boss.position.z+dir3.z*2.4*dt;
-      if(tryMove(nx3,boss.position.z,1)) boss.position.x=nx3;
-      if(tryMove(boss.position.x,nz3,1)) boss.position.z=nz3;
-    }
-    bossLight.position.copy(boss.position);
-    if(db<2.3 && !noteGame.active && !levelWon) triggerEncounter('boss',null);
-  }
-}
+        function tone(freq, dur, type) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type || 'sine';
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.22, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + dur);
+        }
+        function sfxWrong() {
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = 'sawtooth';
+            o.frequency.setValueAtTime(500, audioCtx.currentTime);
+            o.frequency.exponentialRampToValueAtTime(120, audioCtx.currentTime + 0.6);
+            g.gain.setValueAtTime(0.18, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + 0.6);
+        }
+        function sfxWin() {
+            [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => setTimeout(() => tone(f, 0.35, 'triangle'), i * 90));
+        }
 
-// ---------- doors hover/click ----------
-function updateHover(){
-  var ndc = document.pointerLockElement ? {x:0,y:0} : mouseNDC;
-  raycaster.setFromCamera(ndc,camera);
-  var targets=[]; if(redDoor && !redDoorOpen) targets.push(redDoor.mesh); if(bossDoor && !bossDoor.open && bossActive) targets.push(bossDoor.mesh);
-  var hits=raycaster.intersectObjects(targets);
-  if(hoverDoor){ hoverDoor.mat.emissiveIntensity=.4; hoverDoor=null; }
-  if(hits.length && hits[0].distance<4){
-    var d=hits[0].object===((redDoor||{}).mesh)?redDoor:bossDoor;
-    d.mat.emissiveIntensity=1.6; hoverDoor=d;
-  }
-}
-document.addEventListener('mousemove',function(e){
-  if(document.pointerLockElement){
-    theta-=e.movementX*mouseSens;
-    pitch-=e.movementY*mouseSens;
-    pitch=Math.max(-1.2,Math.min(1.2,pitch));
-  }
-  mouseNDC.x=(e.clientX/innerWidth)*2-1; mouseNDC.y=-(e.clientY/innerHeight)*2+1;
-});
-function requestLook(){ if(renderer && !document.pointerLockElement) renderer.domElement.requestPointerLock(); }
-document.addEventListener('click',function(){
-  ac();
-  if(noteGame.active) return;
-  if(hoverDoor===redDoor && !redDoorOpen) startNoteGame('door1');
-  else if(hoverDoor===bossDoor && bossDoor && !bossDoor.open){ openBossDoor(); }
-  else if(camera && !document.getElementById('hud').classList.contains('hidden')) requestLook();
-});
+        function playRedDoorBeep() {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.12);
+        }
 
-function openBossDoor(){
-  bossDoor.open=true; scene.remove(bossDoor.mesh);
-  var idx=walls.indexOf(bossDoor.wallObj); if(idx>-1) walls.splice(idx,1);
-}
+        function playRedDoorVanish() {
+            const notes = [523.25, 659.25, 783.99, 830.61];
+            notes.forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                const start = audioCtx.currentTime + i * 0.11;
+                gain.gain.setValueAtTime(0.18, start);
+                gain.gain.exponentialRampToValueAtTime(0.001, start + 0.14);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(start);
+                osc.stop(start + 0.14);
+            });
+        }
 
-// ---------- HUD / life ----------
-var life=100;
-function setLife(v){
-  life=Math.max(0,Math.min(100,v));
-  document.getElementById('lifebar').style.width=life+'%';
-  var hue=Math.round(life*1.2);
-  document.getElementById('lifebar').style.background='hsl('+hue+',75%,55%)';
-  document.getElementById('lifelabel').textContent='Life '+life+'/100';
-  if(life<=0) gameOver();
-}
-function flash(kind){ var f=document.getElementById('flash'); f.style.background=kind==='good'?'rgba(63,220,106,.35)':'rgba(224,69,60,.4)'; f.style.opacity=1; setTimeout(function(){f.style.opacity=0;},480); }
-function centerText(txt,dur){ var el=document.getElementById('centertext'); el.textContent=txt; el.style.opacity=1; if(dur) setTimeout(function(){el.style.opacity=0;},dur); }
+        let chaseMusicPlaying = false;
+        let chaseMusicTimer = null;
+        function playChaseMusicLoop() {
+            if (!chaseMusicPlaying) return;
+            const notes = [523.25, 554.37, 587.33, 622.25, 659.25, 659.25, 659.25];
+            notes.forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = freq;
+                const start = audioCtx.currentTime + i * 0.08;
+                gain.gain.setValueAtTime(0.09, start);
+                gain.gain.exponentialRampToValueAtTime(0.001, start + 0.07);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(start);
+                osc.stop(start + 0.07);
+            });
+            chaseMusicTimer = setTimeout(playChaseMusicLoop, notes.length * 80 + 30);
+        }
+        function startChaseMusic() {
+            if (chaseMusicPlaying) return;
+            chaseMusicPlaying = true;
+            playChaseMusicLoop();
+        }
+        function stopChaseMusic() {
+            chaseMusicPlaying = false;
+            if (chaseMusicTimer) { clearTimeout(chaseMusicTimer); chaseMusicTimer = null; }
+        }
 
-// ---------- note game ----------
-var noteGame={active:false,seq:[],type:null,timer:null,countdownEnd:0,enemyRef:null};
-var POOL=['F4','A4','C5','E5'];
-function genSeq(n,noRepeatAdjacentOnly){
-  if(n<=4){ var p=POOL.slice(); for(var i=p.length-1;i>0;i--){var r=Math.floor(Math.random()*(i+1));var t=p[i];p[i]=p[r];p[r]=t;} return p.slice(0,n); }
-  var out=[],last=null;
-  for(var k=0;k<n;k++){ var c; do{ c=POOL[Math.floor(Math.random()*POOL.length)]; }while(c===last); out.push(c); last=c; }
-  return out;
-}
-function renderStaff(){
-  var el=document.getElementById('staffsvg'); el.innerHTML='';
-  var renderer2=new VF.Renderer(el,VF.Renderer.Backends.SVG);
-  var w=Math.max(260,80+noteGame.seq.length*60);
-  renderer2.resize(w,150);
-  var ctx=renderer2.getContext(); ctx.setFillStyle('#e8e0cc'); ctx.setStrokeStyle('#e8e0cc');
-  var stave=new VF.Stave(10,30,w-20); stave.addClef('treble'); stave.setContext(ctx).draw();
-  if(noteGame.seq.length){
-    var notes=noteGame.seq.map(function(n){ var m=n.match(/^([A-G]#?)(\d)$/); var sn=new VF.StaveNote({clef:'treble',keys:[m[1].toLowerCase()+'/'+m[2]],duration:'q'}); sn.setStyle({fillStyle:'#3fa9dc',strokeStyle:'#3fa9dc'}); return sn; });
-    VF.Formatter.FormatAndDraw(ctx,stave,notes);
-  }
-}
-var PKEYS=[['C','w'],['C#','b'],['D','w'],['D#','b'],['E','w'],['F','w'],['F#','b'],['G','w'],['G#','b'],['A','w'],['A#','b'],['B','w'],['C','w'],['C#','b'],['D','w'],['D#','b'],['E','w'],['F','w'],['F#','b'],['G','w']];
-function buildPiano(){
-  var wrap=document.getElementById('piano'); wrap.innerHTML='';
-  var WW=32,WS=34,BW=18,BH=78; var wx=0,lastW=0; var oct=4, prevLetter=null;
-  PKEYS.forEach(function(k){
-    var letter=k[0],type=k[1]; if(letter==='C' && prevLetter==='B') oct=5;
-    var name=letter+oct;
-    var el=document.createElement('div'); el.className='pkey '+type;
-    if(type==='w'){ el.style.left=wx+'px'; el.style.width=WW+'px'; lastW=wx; wx+=WS; }
-    else { el.style.left=(lastW+22)+'px'; el.style.width=BW+'px'; el.style.height=BH+'px'; }
-    el.addEventListener('click',function(ev){ ev.stopPropagation(); tone(FREQ[name]||440,.25,'sine'); handleNotePlayed(name); });
-    wrap.appendChild(el);
-    prevLetter=letter;
-  });
-  wrap.style.width=(wx)+'px';
-}
-buildPiano();
+        function playTouchChord() {
+            [523.25, 739.99, 987.77].forEach(freq => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.5);
+            });
+        }
 
-function startNoteGame(type,enemyRef){
-  if(document.pointerLockElement) document.exitPointerLock();
-  noteGame.active=true; noteGame.type=type; noteGame.enemyRef=enemyRef||null;
-  var n = type==='boss'?8:4;
-  noteGame.seq=genSeq(n);
-  document.getElementById('notegame').classList.remove('hidden');
-  document.getElementById('timerwrap').style.visibility = (type==='door1')?'hidden':'visible';
-  renderStaff();
-  if(type!=='door1'){ startCountdown(type==='boss'?18:12); } else { clearCountdown(); }
-}
-var timerRAF=null;
-function startCountdown(sec){
-  clearCountdown();
-  noteGame.countdownEnd=performance.now()+sec*1000;
-  var ring=document.getElementById('timerring'); var C_=188;
-  function step(){
-    var left=noteGame.countdownEnd-performance.now();
-    var frac=Math.max(0,left/(sec*1000));
-    ring.setAttribute('stroke-dashoffset',(C_*(1-frac)));
-    if(left<=0){ onTimeout(); return; }
-    timerRAF=requestAnimationFrame(step);
-  }
-  step();
-}
-function clearCountdown(){ if(timerRAF) cancelAnimationFrame(timerRAF); timerRAF=null; }
+        function playExplosionNoise() {
+            const duration = 0.35;
+            const sampleRate = audioCtx.sampleRate;
+            const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/data.length, 1.5);
+            const src = audioCtx.createBufferSource();
+            const gain = audioCtx.createGain();
+            src.buffer = buffer;
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            src.connect(gain);
+            gain.connect(audioCtx.destination);
+            src.start();
+        }
 
-function onTimeout(){
-  if(noteGame.type==='door1'){ return; }
-  var loss=20;
-  if(life-loss<0){ setLife(0); return; }
-  setLife(life-loss); sfxWrong(); flash('bad');
-  noteGame.seq=genSeq(noteGame.type==='boss'?8:4); renderStaff();
-  startCountdown(noteGame.type==='boss'?18:12);
-}
+        // -------------------- Background music --------------------
+        const themeAudio = new Audio('Theme Music.mp3'); themeAudio.loop = true; themeAudio.volume = 0.5;
+        const bossAudio = new Audio('Boss Music.mp3'); bossAudio.loop = true; bossAudio.volume = 0.5;
+        function fadeAudio(el, to, ms) {
+            const from = el.volume, start = performance.now();
+            function step(t) {
+                const p = Math.min(1, (t-start)/ms);
+                el.volume = from + (to-from)*p;
+                if (p < 1) requestAnimationFrame(step);
+            }
+            requestAnimationFrame(step);
+        }
+        function duckTheme() { themeAudio.volume = 0; }
+        function fadeInTheme() { fadeAudio(themeAudio, 0.5, 1000); }
 
-function handleNotePlayed(name){
-  if(!noteGame.active) return;
-  var expect=noteGame.seq[0];
-  if(name===expect){
-    noteGame.seq.shift(); flash('good'); renderStaff();
-    if(!noteGame.seq.length){ endNoteGame(true); }
-  } else {
-    flash('bad'); sfxWrong();
-    if(noteGame.type!=='door1'){
-      if(life-10<=0){ setLife(0); return; }
-      setLife(life-10);
-    }
-    noteGame.seq=genSeq(noteGame.type==='boss'?8:4); renderStaff();
-  }
-}
+        // -------------------- Life bar / flash --------------------
+        let life = 100;
+        function setLife(v) {
+            life = Math.max(0, Math.min(100, v));
+            document.getElementById('lifebar').style.width = life + '%';
+            document.getElementById('lifebar').style.background = 'hsl(' + Math.round(life*1.2) + ',75%,55%)';
+            document.getElementById('lifelabel').textContent = 'Life ' + life + '/100';
+            if (life <= 0) doGameOver();
+        }
+        function flash(kind) {
+            const f = document.getElementById('flash');
+            f.style.background = kind === 'good' ? 'rgba(63,220,106,.35)' : 'rgba(224,69,60,.4)';
+            f.style.opacity = 1;
+            setTimeout(() => { f.style.opacity = 0; }, 480);
+        }
+        function doGameOver() {
+            gameFrozen = true;
+            noteGame.active = false;
+            clearCountdown();
+            document.getElementById('notegame').style.display = 'none';
+            document.exitPointerLock();
+            document.getElementById('crosshair').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'flex';
+            themeAudio.pause(); bossAudio.pause();
+        }
+        document.getElementById('returnHomeButton').addEventListener('click', () => location.reload());
 
-function endNoteGame(success){
-  clearCountdown(); noteGame.active=false;
-  document.getElementById('notegame').classList.add('hidden');
-  if(!success) return;
-  requestLook();
-  sfxWin();
-  if(noteGame.type==='door1'){ openRedDoor(); }
-  else if(noteGame.type==='enemy'){ setLife(Math.min(100,life+20)); if(chasingEnemy===noteGame.enemyRef) chasingEnemy=null; noteGame.enemyRef.alive=false; explode(noteGame.enemyRef.mesh); defeated++; if(defeated>=8) startBossPhase(); }
-  else if(noteGame.type==='boss'){ setLife(100); levelWon=true; explodeBoss(); }
-}
+        // -------------------- Note-reading mini-game --------------------
+        const VF = Vex.Flow;
+        const FREQ = {C4:261.63,'C#4':277.18,D4:293.66,'D#4':311.13,E4:329.63,F4:349.23,'F#4':369.99,G4:392,'G#4':415.3,A4:440,'A#4':466.16,B4:493.88,C5:523.25,'C#5':554.37,D5:587.33,'D#5':622.25,E5:659.25,F5:698.46,'F#5':739.99,G5:783.99};
+        const POOL = ['F4','A4','C5','E5'];
+        const noteGame = { active:false, type:null, ref:null, seq:[], countdownEnd:0 };
+        let timerRAF = null;
 
-function explode(mesh){
-  sfxExplosion();
-  var t0=performance.now();
-  function step(){ var t=(performance.now()-t0)/500; if(t>=1){ scene.remove(mesh); return; } mesh.scale.setScalar(1+t*2); mesh.material.opacity=1-t; mesh.material.transparent=true; requestAnimationFrame(step); }
-  step();
-}
-function explodeBoss(){
-  boss.dead=true; bossActive=false; scene.remove(bossLight);
-  sfxExplosion();
-  var t0=performance.now(),m=boss;
-  function step(){ var t=(performance.now()-t0)/800; if(t>=1){ scene.remove(m); return; } m.scale.setScalar(1+t*3); m.material.opacity=1-t; m.material.transparent=true; requestAnimationFrame(step); }
-  step();
-}
+        function genSeq(n) {
+            if (n <= 4) {
+                const p = POOL.slice();
+                for (let i = p.length-1; i > 0; i--) { const r = Math.floor(Math.random()*(i+1)); [p[i],p[r]] = [p[r],p[i]]; }
+                return p.slice(0, n);
+            }
+            const out = []; let last = null;
+            for (let k = 0; k < n; k++) { let c; do { c = POOL[Math.floor(Math.random()*POOL.length)]; } while (c === last); out.push(c); last = c; }
+            return out;
+        }
+        function renderStaff() {
+            const el = document.getElementById('staffsvg'); el.innerHTML = '';
+            const r = new VF.Renderer(el, VF.Renderer.Backends.SVG);
+            const w = Math.max(260, 80 + noteGame.seq.length*60);
+            r.resize(w, 150);
+            const ctx = r.getContext(); ctx.setFillStyle('#e8e0cc'); ctx.setStrokeStyle('#e8e0cc');
+            const stave = new VF.Stave(10, 30, w-20); stave.addClef('treble'); stave.setContext(ctx).draw();
+            if (noteGame.seq.length) {
+                const notes = noteGame.seq.map(n => {
+                    const m = n.match(/^([A-G]#?)(\d)$/);
+                    const sn = new VF.StaveNote({ clef:'treble', keys:[m[1].toLowerCase()+'/'+m[2]], duration:'q' });
+                    sn.setStyle({ fillStyle:'#3fa9dc', strokeStyle:'#3fa9dc' });
+                    return sn;
+                });
+                VF.Formatter.FormatAndDraw(ctx, stave, notes);
+            }
+        }
+        const PKEYS = [['C','w'],['C#','b'],['D','w'],['D#','b'],['E','w'],['F','w'],['F#','b'],['G','w'],['G#','b'],['A','w'],['A#','b'],['B','w'],['C','w'],['C#','b'],['D','w'],['D#','b'],['E','w'],['F','w'],['F#','b'],['G','w']];
+        function buildPiano() {
+            const wrap = document.getElementById('piano'); wrap.innerHTML = '';
+            const WW=32, WS=34, BW=18, BH=78; let wx=0, lastW=0, oct=4, prevLetter=null;
+            PKEYS.forEach(k => {
+                const letter=k[0], type=k[1]; if (letter==='C' && prevLetter==='B') oct=5;
+                const name = letter+oct;
+                const el = document.createElement('div'); el.className = 'pkey '+type;
+                if (type==='w') { el.style.left=wx+'px'; el.style.width=WW+'px'; lastW=wx; wx+=WS; }
+                else { el.style.left=(lastW+22)+'px'; el.style.width=BW+'px'; el.style.height=BH+'px'; }
+                el.addEventListener('click', ev => { ev.stopPropagation(); tone(FREQ[name]||440, 0.25, 'sine'); handleNotePlayed(name); });
+                wrap.appendChild(el);
+                prevLetter = letter;
+            });
+            wrap.style.width = wx+'px';
+        }
+        buildPiano();
 
-function openRedDoor(){
-  redDoorOpen=true;
-  var idx=walls.indexOf(redDoor.wallObj); if(idx>-1) walls.splice(idx,1);
-  var i=redDoor.mesh, t0=performance.now();
-  function step(){ var t=(performance.now()-t0)/2000; if(t>=1){ scene.remove(i); frozen=false; centerText('Defeat all 8 enemies.',4000); return; } i.material.transparent=true; i.material.opacity=1-t; requestAnimationFrame(step); }
-  step();
-}
+        function startNoteGame(type, ref) {
+            if (document.pointerLockElement) document.exitPointerLock();
+            document.getElementById('crosshair').style.display = 'none';
+            gameFrozen = true;
+            stopChaseMusic();
+            noteGame.active = true; noteGame.type = type; noteGame.ref = ref || null;
+            noteGame.seq = genSeq(type==='boss' ? 8 : 4);
+            document.getElementById('notegame').style.display = 'flex';
+            document.getElementById('timerwrap').style.visibility = (type==='door1') ? 'hidden' : 'visible';
+            renderStaff();
+            if (type !== 'door1') startCountdown(type==='boss' ? 18 : 12); else clearCountdown();
+        }
+        function startCountdown(sec) {
+            clearCountdown();
+            noteGame.countdownEnd = performance.now() + sec*1000;
+            const ring = document.getElementById('timerring'), C_ = 188;
+            function step() {
+                const left = noteGame.countdownEnd - performance.now();
+                const frac = Math.max(0, left/(sec*1000));
+                ring.setAttribute('stroke-dashoffset', C_*(1-frac));
+                if (left <= 0) { onTimeout(); return; }
+                timerRAF = requestAnimationFrame(step);
+            }
+            step();
+        }
+        function clearCountdown() { if (timerRAF) cancelAnimationFrame(timerRAF); timerRAF = null; }
+        function onTimeout() {
+            if (noteGame.type === 'door1') return;
+            if (life - 20 < 0) { setLife(0); return; }
+            setLife(life - 20); sfxWrong(); flash('bad');
+            noteGame.seq = genSeq(noteGame.type==='boss' ? 8 : 4); renderStaff();
+            startCountdown(noteGame.type==='boss' ? 18 : 12);
+        }
+        function handleNotePlayed(name) {
+            if (!noteGame.active) return;
+            const expect = noteGame.seq[0];
+            if (name === expect) {
+                noteGame.seq.shift(); flash('good'); renderStaff();
+                if (!noteGame.seq.length) endNoteGame(true);
+            } else {
+                flash('bad'); sfxWrong();
+                if (noteGame.type !== 'door1') {
+                    if (life - 10 <= 0) { setLife(0); return; }
+                    setLife(life - 10);
+                    startCountdown(noteGame.type==='boss' ? 18 : 12);
+                }
+                noteGame.seq = genSeq(noteGame.type==='boss' ? 8 : 4); renderStaff();
+            }
+        }
+        function endNoteGame(success) {
+            clearCountdown(); noteGame.active = false;
+            document.getElementById('notegame').style.display = 'none';
+            if (!success) return;
+            sfxWin();
+            if (noteGame.type === 'door1') {
+                playRedDoorVanish();
+                doorOpening = true; doorOpenStartTime = performance.now();
+                gameFrozen = false;
+                document.getElementById('crosshair').style.display = 'block';
+                document.body.requestPointerLock();
+            } else if (noteGame.type === 'enemy') {
+                setLife(Math.min(100, life + 20));
+                playExplosionNoise();
+                const e = noteGame.ref; e.dying = true; e.dieStart = performance.now(); e.diePhase = 0;
+                // gameFrozen / crosshair / pointer-lock are restored by updateDying() once the death animation finishes
+            } else if (noteGame.type === 'boss') {
+                setLife(100);
+                playExplosionNoise();
+                const b = noteGame.ref; b.dying = true; b.dieStart = performance.now(); b.diePhase = 0;
+            }
+        }
 
-function startBossPhase(){
-  bossActive=true;
-  centerText('Find the yellow door and defeat the boss.',4000);
-  spawnBoss();
-}
+        // -------------------- Maze generation – protect 2×2 start room --------------------
+        function generateMaze() {
+            maze = [];
+            for (let x = 0; x < mazeWidth; x++) {
+                maze[x] = [];
+                for (let z = 0; z < mazeHeight; z++) {
+                    maze[x][z] = { visited: false, walls: [true, true, true, true] };
+                }
+            }
 
-function triggerEncounter(type,enemyRef){
-  if(noteGame.active || levelWon) return;
-  startNoteGame(type,enemyRef);
-}
+            // Open only the internal walls of the 2×2 start room
+            maze[0][0].walls[1] = false; maze[1][0].walls[3] = false;
+            maze[0][0].walls[2] = false; maze[0][1].walls[0] = false;
+            maze[1][0].walls[2] = false; maze[1][1].walls[0] = false;
+            maze[0][1].walls[1] = false; maze[1][1].walls[3] = false;
 
-// ---------- level complete ----------
-function checkLevelExit(){
-  if(!bossDoor || !bossDoor.open) return;
-  var i=bossDoorCell[0],j=bossDoorCell[1],cz=cellZ(i)+CS/2;
-  if(pos.z>cz+1.2){ fadeOutComplete(); }
-}
-var completing=false;
-function fadeOutComplete(){
-  if(completing) return; completing=true; frozen=true;
-  var f=document.getElementById('flash'); f.style.transition='opacity 1s'; f.style.background='#000'; f.style.opacity=1;
-  setTimeout(function(){ document.getElementById('levelcomplete').classList.remove('hidden'); },1000);
-}
+            maze[0][0].visited = true;
+            maze[1][0].visited = true;
+            maze[0][1].visited = true;
+            maze[1][1].visited = true;
 
-function gameOver(){ frozen=true; document.getElementById('gameover').classList.remove('hidden'); }
+            // Single forced exit (east of cell 1,1) – this is where the red door will sit
+            maze[1][1].walls[1] = false;
+            maze[2][1].walls[3] = false;
+            maze[2][1].visited = true;
 
-// ---------- main loop ----------
-function animate(){
-  requestAnimationFrame(animate);
-  var dt=Math.min(.05,clock.getDelta());
-  if(!frozen){ updatePlayer(dt); }
-  if(!noteGame.active && !frozen){ updateEnemies(dt); checkLevelExit(); }
-  updateHover();
-  drawMinimap();
-  renderer.render(scene,camera);
-}
+            const stack = [];
+            let current = { x: 2, z: 1 };
+            while (true) {
+                const neighbors = [];
+                const { x, z } = current;
+                if (z > 0 && !maze[x][z-1].visited) neighbors.push({x, z:z-1, wall:0, neighborWall:2});
+                if (x < mazeWidth-1 && !maze[x+1][z].visited) neighbors.push({x:x+1, z, wall:1, neighborWall:3});
+                if (z < mazeHeight-1 && !maze[x][z+1].visited) neighbors.push({x, z:z+1, wall:2, neighborWall:0});
+                if (x > 0 && !maze[x-1][z].visited) neighbors.push({x:x-1, z, wall:3, neighborWall:1});
+                if (neighbors.length > 0) {
+                    const next = neighbors[Math.floor(Math.random()*neighbors.length)];
+                    maze[current.x][current.z].walls[next.wall] = false;
+                    maze[next.x][next.z].walls[next.neighborWall] = false;
+                    maze[next.x][next.z].visited = true;
+                    stack.push(current);
+                    current = {x: next.x, z: next.z};
+                } else if (stack.length > 0) current = stack.pop();
+                else break;
+            }
 
-window.addEventListener('keydown',function(e){ keys[e.key]=true; });
-window.addEventListener('keyup',function(e){ keys[e.key]=false; });
+            // Extra openings for easy navigation – NEVER open into the start room
+            for (let i = 0; i < 12; i++) {
+                const x = Math.floor(Math.random() * mazeWidth);
+                const z = Math.floor(Math.random() * mazeHeight);
+                if (x < 2 && z < 2) continue; // protect start room
+                const dir = Math.floor(Math.random() * 4);
+                if (dir === 0 && z > 0 && !(x < 2 && z-1 < 2)) {
+                    maze[x][z].walls[0] = false; maze[x][z-1].walls[2] = false;
+                } else if (dir === 1 && x < mazeWidth-1 && !(x+1 < 2 && z < 2)) {
+                    maze[x][z].walls[1] = false; maze[x+1][z].walls[3] = false;
+                } else if (dir === 2 && z < mazeHeight-1 && !(x < 2 && z+1 < 2)) {
+                    maze[x][z].walls[2] = false; maze[x][z+1].walls[0] = false;
+                } else if (dir === 3 && x > 0 && !(x-1 < 2 && z < 2)) {
+                    maze[x][z].walls[3] = false; maze[x-1][z].walls[1] = false;
+                }
+            }
 
-document.getElementById('startBtn').addEventListener('click',function(){
-  ac();
-  document.getElementById('home').classList.add('hidden');
-  document.getElementById('hud').classList.remove('hidden');
-  document.getElementById('crosshair').classList.remove('hidden');
-  document.getElementById('minimap').classList.remove('hidden');
-  setLife(100);
-  initThree(); buildRoom(); genMaze(); buildMazeMesh(); spawnEnemies();
-  camera.position.copy(pos); camera.rotation.set(0,theta,0);
-  frozen=false;
-  requestLook();
-  animate();
-});
-document.getElementById('homeBtn2').addEventListener('click',function(){ location.reload(); });
-})();
-</script>
-</body></html>
+            // Pre-open a wall slot for the future yellow door (east wall of cell 4,4)
+            // so no solid wall mesh is built there
+            if (mazeWidth > 4 && mazeHeight > 4) {
+                maze[4][4].walls[1] = false;
+                if (5 < mazeWidth) maze[5][4].walls[3] = false;
+            }
+        }
+
+        // -------------------- Door panels (facing the INSIDE of the room) --------------------
+        function addDoorPanels(parentGroup, width, height, thickness, isYellow = false) {
+            const panelMat = new THREE.MeshStandardMaterial({
+                color: isYellow ? 0x888800 : 0x550000,
+                roughness: 0.6,
+                transparent: true,
+                opacity: 1
+            });
+            if (isYellow) yellowDoorPanelMaterials.push(panelMat);
+            else doorPanelMaterials.push(panelMat);
+
+            const pw = width * 0.38;
+            const ph = height * 0.38;
+            const offsets = [
+                { y:  height*0.22, z: -width*0.22 },
+                { y:  height*0.22, z:  width*0.22 },
+                { y: -height*0.22, z: -width*0.22 },
+                { y: -height*0.22, z:  width*0.22 }
+            ];
+            offsets.forEach(o => {
+                const panel = new THREE.Mesh(
+                    new THREE.BoxGeometry(thickness * 0.55, ph, pw),
+                    panelMat
+                );
+                panel.position.set(-thickness * 0.55, o.y, o.z);
+                parentGroup.add(panel);
+            });
+        }
+
+        // -------------------- Create maze --------------------
+        function createMaze() {
+            while (scene.children.length) scene.remove(scene.children[0]);
+            walls = [];
+            door = null; doorOpen = false; doorOpening = false; isHoveringDoor = false;
+            doorPanelMaterials = [];
+            yellowDoor = null; yellowDoorOpen = false; yellowDoorOpening = false; isHoveringYellow = false;
+            yellowDoorPanelMaterials = [];
+            boss = null; bossSpawned = false;
+            enemies = []; gameFrozen = false; touchingEnemy = null;
+            levelComplete = false; fadingToBlack = false;
+
+            const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
+            const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
+            const ceilMat  = new THREE.MeshStandardMaterial({ color: ceilingColor, roughness: 0.8 });
+            floorMatRef = floorMat; ceilMatRef = ceilMat;
+
+            const floorGeo = new THREE.PlaneGeometry(mazeWidth*cellSize, mazeHeight*cellSize);
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI/2;
+            floor.position.set(mazeWidth*cellSize/2, 0, mazeHeight*cellSize/2);
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceiling = new THREE.Mesh(floorGeo, ceilMat);
+            ceiling.rotation.x = Math.PI/2;
+            ceiling.position.set(mazeWidth*cellSize/2, wallHeight, mazeHeight*cellSize/2);
+            scene.add(ceiling);
+
+            for (let x = 0; x < mazeWidth; x++) {
+                for (let z = 0; z < mazeHeight; z++) {
+                    const cell = maze[x][z];
+                    if (cell.walls[0]) {
+                        const w = new THREE.Mesh(new THREE.BoxGeometry(cellSize, wallHeight, wallThickness), wallMat);
+                        w.position.set(x*cellSize + cellSize/2, wallHeight/2, z*cellSize);
+                        w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
+                    }
+                    if (cell.walls[1]) {
+                        const w = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, cellSize), wallMat);
+                        w.position.set(x*cellSize + cellSize, wallHeight/2, z*cellSize + cellSize/2);
+                        w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
+                    }
+                    if (cell.walls[2]) {
+                        const w = new THREE.Mesh(new THREE.BoxGeometry(cellSize, wallHeight, wallThickness), wallMat);
+                        w.position.set(x*cellSize + cellSize/2, wallHeight/2, (z+1)*cellSize);
+                        w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
+                    }
+                    if (cell.walls[3]) {
+                        const w = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, cellSize), wallMat);
+                        w.position.set(x*cellSize, wallHeight/2, z*cellSize + cellSize/2);
+                        w.castShadow = w.receiveShadow = true; scene.add(w); walls.push(w);
+                    }
+                }
+            }
+
+            // ----- Red door (only exit from 2×2 room) -----
+            door = new THREE.Group();
+            doorMaterial = new THREE.MeshStandardMaterial({
+                color: doorNormalColor, roughness: 0.55, transparent: true, opacity: 1
+            });
+            const doorMain = new THREE.Mesh(
+                new THREE.BoxGeometry(wallThickness, wallHeight, doorWidth),
+                doorMaterial
+            );
+            door.add(doorMain);
+            addDoorPanels(door, doorWidth, wallHeight, wallThickness, false);
+            door.position.set(2 * cellSize, wallHeight/2, 1 * cellSize + cellSize/2);
+            scene.add(door);
+
+            // Side fillers so the rest of the wall is solid
+            const sideW = (cellSize - doorWidth) / 2;
+            const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
+            const s1 = new THREE.Mesh(sideGeo, wallMat);
+            s1.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 - doorWidth/2 - sideW/2);
+            scene.add(s1); walls.push(s1);
+            const s2 = new THREE.Mesh(sideGeo, wallMat);
+            s2.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 + doorWidth/2 + sideW/2);
+            scene.add(s2); walls.push(s2);
+
+            // Bright lighting
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            for (let x = 0; x < mazeWidth; x += 1.5) {
+                for (let z = 0; z < mazeHeight; z += 1.5) {
+                    const l = new THREE.PointLight(0xfff8e7, 0.9, 14, 1.1);
+                    l.position.set(x*cellSize + cellSize/2, wallHeight-0.2, z*cellSize + cellSize/2);
+                    scene.add(l);
+                }
+            }
+            scene.add(new THREE.HemisphereLight(0xffffff, 0xb0c4de, 0.45));
+        }
+
+        // -------------------- Enemies & Boss --------------------
+        function createEnemy(x, z, isBoss = false) {
+            const group = new THREE.Group();
+            const radius = isBoss ? 0.95 : ENEMY_RADIUS;
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 0.75, roughness: 0.3
+            });
+            const sphere = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 16), mat);
+            group.add(sphere);
+
+            const faceGroup = new THREE.Group();
+            const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const sc = isBoss ? 3.6 : 1;
+            const armGeo = new THREE.BoxGeometry(0.04*sc, 0.18*sc, 0.02*sc);
+            const leftArm = new THREE.Mesh(armGeo, black);
+            leftArm.position.set(-0.07*sc, 0.11*sc, radius-0.02);
+            leftArm.rotation.z = 0.5;
+            faceGroup.add(leftArm);
+            const rightArm = new THREE.Mesh(armGeo, black);
+            rightArm.position.set(0.07*sc, 0.11*sc, radius-0.02);
+            rightArm.rotation.z = -0.5;
+            faceGroup.add(rightArm);
+            const dotGeo = new THREE.SphereGeometry(0.035*sc, 8, 6);
+            const ld = new THREE.Mesh(dotGeo, black);
+            ld.position.set(-0.09*sc, -0.02*sc, radius-0.02);
+            faceGroup.add(ld);
+            const rd = new THREE.Mesh(dotGeo, black);
+            rd.position.set(0.09*sc, -0.02*sc, radius-0.02);
+            faceGroup.add(rd);
+            group.add(faceGroup);
+
+            const yPos = isBoss ? radius + 0.05 : 1.0;
+            group.position.set(x, yPos, z);
+            const angle = isBoss ? Math.PI : Math.random() * Math.PI * 2;
+            group.rotation.y = angle;
+            scene.add(group);
+
+            return {
+                group, sphere, sphereMat: mat, faceGroup,
+                x, z, radius, facing: angle,
+                isChasing: false, wanderTimer: 0, turning: false, turnDir: 1,
+                dying: false, dieStart: 0, diePhase: 0, isBoss
+            };
+        }
+
+        function spawnEnemies() {
+            const candidates = [];
+            for (let x = 0; x < mazeWidth; x++) {
+                for (let z = 0; z < mazeHeight; z++) {
+                    if (x <= 1 && z <= 1) continue;
+                    if (x === 2 && z === 1) continue;
+                    candidates.push({x, z});
+                }
+            }
+            for (let i = candidates.length-1; i > 0; i--) {
+                const j = Math.floor(Math.random()*(i+1));
+                [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+            }
+            for (let i = 0; i < 8 && i < candidates.length; i++) {
+                const c = candidates[i];
+                enemies.push(createEnemy(c.x*cellSize + cellSize/2, c.z*cellSize + cellSize/2, false));
+            }
+        }
+
+        let bossRedLight = null;
+        function enterBossPhase() {
+            if (ceilMatRef) ceilMatRef.color.setHex(0x000000);
+            if (floorMatRef) { floorMatRef.color.setHex(0xff0000); floorMatRef.emissive.setHex(0x550000); }
+            bossRedLight = new THREE.AmbientLight(0xff2222, 0.6);
+            scene.add(bossRedLight);
+            themeAudio.pause();
+            bossAudio.currentTime = 0; bossAudio.volume = 0.5; bossAudio.play().catch(()=>{});
+        }
+        function exitBossPhase() {
+            if (ceilMatRef) ceilMatRef.color.setHex(ceilingColor);
+            if (floorMatRef) { floorMatRef.color.setHex(floorColor); floorMatRef.emissive.setHex(0x000000); }
+            if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
+            bossAudio.pause();
+            themeAudio.volume = 0; themeAudio.play().catch(()=>{});
+            fadeInTheme();
+        }
+
+        // Yellow door on a real wall + Boss in front of it
+        function spawnBossAndYellowDoor() {
+            if (bossSpawned) return;
+            bossSpawned = true;
+
+            // Yellow door sits in the pre-opened east wall of cell (4,4)
+            const doorX = 5 * cellSize;               // east edge of cell 4
+            const doorZ = 4 * cellSize + cellSize/2;
+
+            yellowDoor = new THREE.Group();
+            yellowDoorMaterial = new THREE.MeshStandardMaterial({
+                color: 0xdddd00, roughness: 0.5, transparent: true, opacity: 1, side: THREE.FrontSide
+            });
+            const yMain = new THREE.Mesh(
+                new THREE.PlaneGeometry(doorWidth * 1.1, wallHeight),
+                yellowDoorMaterial
+            );
+            yMain.rotation.y = -Math.PI/2; // normal faces -X, the side the boss stands on
+            yellowDoor.add(yMain);
+            const yBackMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
+            const yBack = new THREE.Mesh(new THREE.PlaneGeometry(doorWidth * 1.1, wallHeight), yBackMat);
+            yBack.rotation.y = Math.PI/2; // normal faces +X, the outside/exterior side
+            yellowDoor.add(yBack);
+            yellowDoor.position.set(doorX, wallHeight/2, doorZ);
+            scene.add(yellowDoor);
+
+            // Side fillers for the yellow door (same wall)
+            const sideW = (cellSize - doorWidth*1.1) / 2;
+            const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
+            const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
+            const ys1 = new THREE.Mesh(sideGeo, wallMat);
+            ys1.position.set(doorX, wallHeight/2, doorZ - doorWidth*1.1/2 - sideW/2);
+            scene.add(ys1); walls.push(ys1);
+            const ys2 = new THREE.Mesh(sideGeo, wallMat);
+            ys2.position.set(doorX, wallHeight/2, doorZ + doorWidth*1.1/2 + sideW/2);
+            scene.add(ys2); walls.push(ys2);
+
+            // Boss stands in front of the door (inside the maze), door behind it
+            const bossX = doorX - 1.4;
+            const bossZ = doorZ;
+            boss = createEnemy(bossX, bossZ, true);
+            boss.facing = Math.PI; // face toward -X, into the maze
+            boss.group.rotation.y = boss.facing;
+        }
+
+        // -------------------- Collision / vision --------------------
+        function checkWallCollision(px, pz, radius) {
+            const s = new THREE.Sphere(new THREE.Vector3(px, 1.0, pz), radius);
+            for (const w of walls) {
+                if (s.intersectsBox(new THREE.Box3().setFromObject(w))) return true;
+            }
+            if (!doorOpen && door) {
+                if (s.intersectsBox(new THREE.Box3().setFromObject(door))) return true;
+            }
+            if (!yellowDoorOpen && yellowDoor && bossSpawned) {
+                if (s.intersectsBox(new THREE.Box3().setFromObject(yellowDoor))) return true;
+            }
+            return false;
+        }
+
+        function checkPlayerEnemyCollision() {
+            for (const e of enemies) {
+                if (e.dying) continue;
+                const dx = player.x - e.x, dz = player.z - e.z;
+                if (Math.sqrt(dx*dx + dz*dz) < player.radius + e.radius) return e;
+            }
+            if (boss && !boss.dying) {
+                const dx = player.x - boss.x, dz = player.z - boss.z;
+                if (Math.sqrt(dx*dx + dz*dz) < player.radius + boss.radius) return boss;
+            }
+            return null;
+        }
+
+        const raycaster = new THREE.Raycaster();
+
+        function canSeeAhead(e, dist) {
+            const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
+            const dir = new THREE.Vector3(Math.sin(e.facing), 0, Math.cos(e.facing)).normalize();
+            raycaster.set(origin, dir); raycaster.far = dist;
+            const hits = raycaster.intersectObjects(walls);
+            return hits.length === 0 || hits[0].distance >= dist - 0.05;
+        }
+
+        function isFacingCorner(e) {
+            const short = cellSize * 0.35;
+            if (canSeeAhead(e, short)) return false;
+            const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
+            function blocked(f) {
+                const dir = new THREE.Vector3(Math.sin(f), 0, Math.cos(f)).normalize();
+                raycaster.set(origin, dir); raycaster.far = short;
+                const hits = raycaster.intersectObjects(walls);
+                return hits.length > 0 && hits[0].distance < short;
+            }
+            return blocked(e.facing + 0.6) && blocked(e.facing - 0.6);
+        }
+
+        function canSeePlayer(e) {
+            const dx = player.x - e.x, dz = player.z - e.z;
+            const dist = Math.sqrt(dx*dx + dz*dz);
+            if (dist > 16 || dist < 0.15) return false;
+            const dirX = dx/dist, dirZ = dz/dist;
+            const fx = Math.sin(e.facing), fz = Math.cos(e.facing);
+            if (fx*dirX + fz*dirZ < 0.82) return false;
+            const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
+            const direction = new THREE.Vector3(dirX, 0, dirZ).normalize();
+            raycaster.set(origin, direction); raycaster.far = dist;
+            const hits = raycaster.intersectObjects(walls);
+            if (hits.length > 0 && hits[0].distance < dist - 0.2) return false;
+            return true;
+        }
+
+        function isDoorUnderCrosshair() {
+            if (!door || doorOpen || doorOpening) return false;
+            raycaster.far = Infinity;
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            return raycaster.intersectObject(door, true).length > 0;
+        }
+        function isYellowDoorUnderCrosshair() {
+            if (!yellowDoor || yellowDoorOpen || yellowDoorOpening) return false;
+            if (boss && !boss.dying) return false; // only after Boss is gone
+            raycaster.far = Infinity;
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            return raycaster.intersectObject(yellowDoor, true).length > 0;
+        }
+
+        function tryOpenDoor() {
+            if (gameFrozen || levelComplete || noteGame.active) return;
+            if (isDoorUnderCrosshair()) {
+                startNoteGame('door1', null);
+                return;
+            }
+            if (isYellowDoorUnderCrosshair()) {
+                playRedDoorVanish();
+                yellowDoorOpening = true;
+                yellowDoorOpenStartTime = performance.now();
+                fadingToBlack = true;
+                fadeStartTime = performance.now();
+            }
+        }
+
+        // -------------------- Input --------------------
+        const keys = {};
+        document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+        document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
+
+        document.addEventListener('click', () => {
+            if (document.pointerLockElement === document.body) {
+                tryOpenDoor();
+            } else if (!gameFrozen && !levelComplete && !noteGame.active) {
+                document.body.requestPointerLock();
+            }
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (document.pointerLockElement === document.body && !gameFrozen && !levelComplete) {
+                yaw   -= e.movementX * mouseSensitivity;
+                pitch -= e.movementY * mouseSensitivity;
+                pitch = Math.max(-Math.PI/2+0.1, Math.min(Math.PI/2-0.1, pitch));
+                camera.rotation.y = yaw;
+                camera.rotation.x = pitch;
+            }
+        });
+
+        // -------------------- AI --------------------
+        function updateOneEnemy(e, dt) {
+            if (e.dying) return false;
+
+            let shouldChase = false;
+            if (e.isBoss) {
+                const dist = Math.sqrt((player.x-e.x)**2 + (player.z-e.z)**2);
+                if (canSeePlayer(e) && dist < cellSize * 2.0) shouldChase = true;
+            } else {
+                shouldChase = canSeePlayer(e);
+            }
+            e.isChasing = shouldChase;
+
+            if (e.isBoss && !shouldChase) {
+                e.group.position.set(e.x, e.radius+0.05, e.z);
+                e.group.rotation.y = e.facing;
+                return false;
+            }
+
+            const tooClose = !canSeeAhead(e, cellSize * 0.2);
+            const corner = isFacingCorner(e);
+
+            if (e.turning || tooClose || corner) {
+                if (!e.turning) {
+                    e.turning = true;
+                    e.turnDir = Math.random() < 0.5 ? 1 : -1;
+                }
+                e.facing += e.turnDir * 0.14;
+                if (canSeeAhead(e, cellSize) && !isFacingCorner(e)) e.turning = false;
+                e.group.rotation.y = e.facing;
+                e.group.position.set(e.x, e.isBoss ? e.radius+0.05 : 1.0, e.z);
+                return e.isChasing;
+            }
+
+            const speed = e.isChasing ? ENEMY_FAST_SPEED : ENEMY_SLOW_SPEED;
+            let moveX = 0, moveZ = 0;
+            if (e.isChasing) {
+                const dx = player.x - e.x, dz = player.z - e.z;
+                const d = Math.sqrt(dx*dx + dz*dz) || 0.001;
+                moveX = (dx/d)*speed; moveZ = (dz/d)*speed;
+                e.facing = Math.atan2(dx, dz);
+            } else {
+                e.wanderTimer -= dt;
+                if (e.wanderTimer <= 0) {
+                    e.facing += (Math.random()-0.5)*1.4;
+                    e.wanderTimer = 2 + Math.random()*2.5;
+                }
+                moveX = Math.sin(e.facing)*speed;
+                moveZ = Math.cos(e.facing)*speed;
+            }
+
+            let newX = e.x + moveX, newZ = e.z + moveZ;
+            let hit = false;
+            if (!checkWallCollision(newX, e.z, e.radius)) e.x = newX; else hit = true;
+            if (!checkWallCollision(e.x, newZ, e.radius)) e.z = newZ; else hit = true;
+            if (hit) { e.turning = true; e.turnDir = Math.random()<0.5 ? 1 : -1; }
+
+            e.x = Math.max(0.6, Math.min(mazeWidth*cellSize-0.6, e.x));
+            e.z = Math.max(0.6, Math.min(mazeHeight*cellSize-0.6, e.z));
+            e.group.position.set(e.x, e.isBoss ? e.radius+0.05 : 1.0, e.z);
+            e.group.rotation.y = e.facing;
+            return e.isChasing;
+        }
+
+        function updateEnemies(dt) {
+            let any = false;
+            for (const e of enemies) if (updateOneEnemy(e, dt)) any = true;
+            if (boss && !boss.dying) if (updateOneEnemy(boss, dt)) any = true;
+            if (any) startChaseMusic(); else stopChaseMusic();
+        }
+
+        // -------------------- Death --------------------
+        function updateDying(now) {
+            const list = [...enemies];
+            if (boss) list.push(boss);
+
+            for (const e of list) {
+                if (!e.dying) continue;
+                const elapsed = (now - e.dieStart) / 1000;
+                if (e.diePhase === 0) {
+                    const t = Math.min(elapsed/0.5, 1);
+                    const r = 1 - t;
+                    e.sphereMat.color.setRGB(r,0,0);
+                    e.sphereMat.emissive.setRGB(r*0.5,0,0);
+                    if (t >= 1) { e.diePhase = 1; e.dieStart = now; }
+                } else if (e.diePhase === 1) {
+                    const t = Math.min(elapsed/0.1, 1);
+                    const target = (wallHeight - 0.15) / e.radius;
+                    e.group.scale.setScalar(1 + t*(target-1));
+                    if (t >= 1) {
+                        scene.remove(e.group);
+                        if (e.isBoss) {
+                            boss = null;
+                            exitBossPhase();
+                        } else {
+                            enemies = enemies.filter(en => en !== e);
+                            if (enemies.length === 0 && !bossSpawned) {
+                                spawnBossAndYellowDoor();
+                                enterBossPhase();
+                            } else {
+                                fadeInTheme();
+                            }
+                        }
+                        if (touchingEnemy === e) {
+                            touchingEnemy = null;
+                            gameFrozen = false;
+                            stopChaseMusic();
+                            document.getElementById('crosshair').style.display = 'block';
+                            document.body.requestPointerLock();
+                        }
+                    }
+                }
+            }
+        }
+
+        // -------------------- Minimap --------------------
+        function drawMinimap() {
+            const canvas = document.getElementById('minimapCanvas');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, cellPx = w / mazeWidth;
+            ctx.fillStyle = 'rgba(20,20,40,0.9)';
+            ctx.fillRect(0,0,w,w);
+            ctx.fillStyle = '#2a3a5a';
+            for (let x=0;x<mazeWidth;x++) for (let z=0;z<mazeHeight;z++)
+                ctx.fillRect(x*cellPx+1, z*cellPx+1, cellPx-2, cellPx-2);
+
+            ctx.strokeStyle = '#c0a0e0'; ctx.lineWidth = 2;
+            for (let x=0;x<mazeWidth;x++) for (let z=0;z<mazeHeight;z++) {
+                const c = maze[x][z];
+                if (c.walls[0]){ctx.beginPath();ctx.moveTo(x*cellPx,z*cellPx);ctx.lineTo((x+1)*cellPx,z*cellPx);ctx.stroke();}
+                if (c.walls[1]){ctx.beginPath();ctx.moveTo((x+1)*cellPx,z*cellPx);ctx.lineTo((x+1)*cellPx,(z+1)*cellPx);ctx.stroke();}
+                if (c.walls[2]){ctx.beginPath();ctx.moveTo(x*cellPx,(z+1)*cellPx);ctx.lineTo((x+1)*cellPx,(z+1)*cellPx);ctx.stroke();}
+                if (c.walls[3]){ctx.beginPath();ctx.moveTo(x*cellPx,z*cellPx);ctx.lineTo(x*cellPx,(z+1)*cellPx);ctx.stroke();}
+            }
+
+            ctx.fillStyle = '#ff3333';
+            for (const e of enemies) {
+                if (e.dying) continue;
+                ctx.beginPath(); ctx.arc((e.x/cellSize)*cellPx, (e.z/cellSize)*cellPx, 4, 0, Math.PI*2); ctx.fill();
+            }
+            if (boss && !boss.dying) {
+                ctx.fillStyle = '#ff0000';
+                ctx.beginPath(); ctx.arc((boss.x/cellSize)*cellPx, (boss.z/cellSize)*cellPx, 7, 0, Math.PI*2); ctx.fill();
+            }
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath(); ctx.arc((player.x/cellSize)*cellPx, (player.z/cellSize)*cellPx, 5, 0, Math.PI*2); ctx.fill();
+        }
+
+        // -------------------- Main loop --------------------
+        let lastTime = performance.now();
+        function animate(now) {
+            requestAnimationFrame(animate);
+            const dt = Math.min((now - lastTime)/1000, 0.05);
+            lastTime = now;
+
+            // Red door + panels fade together
+            if (doorOpening && door) {
+                const t = Math.min((now - doorOpenStartTime)/1000, 1);
+                doorMaterial.opacity = 1 - t;
+                doorPanelMaterials.forEach(m => m.opacity = 1 - t);
+                if (t >= 1) {
+                    doorOpening = false; doorOpen = true; door.visible = false; isHoveringDoor = false;
+                }
+            }
+
+            // Yellow door + panels fade together
+            if (yellowDoorOpening && yellowDoor) {
+                const t = Math.min((now - yellowDoorOpenStartTime)/1000, 1);
+                yellowDoorMaterial.opacity = 1 - t;
+                yellowDoorPanelMaterials.forEach(m => m.opacity = 1 - t);
+                if (t >= 1) {
+                    yellowDoorOpening = false; yellowDoorOpen = true; yellowDoor.visible = false;
+                }
+            }
+
+            if (fadingToBlack) {
+                const t = Math.min((now - fadeStartTime)/1000, 1);
+                document.getElementById('fadeOverlay').style.opacity = t;
+                if (t >= 1) {
+                    fadingToBlack = false;
+                    levelComplete = true;
+                    document.getElementById('levelCompleteText').style.display = 'block';
+                    document.exitPointerLock();
+                    document.getElementById('crosshair').style.display = 'none';
+                }
+            }
+
+            if (!gameFrozen && !levelComplete) {
+                // Hover (any distance)
+                if (!doorOpen && !doorOpening && door) {
+                    const h = isDoorUnderCrosshair();
+                    if (h && !isHoveringDoor) {
+                        doorMaterial.color.setHex(doorHoverColor);
+                        playRedDoorBeep();
+                        isHoveringDoor = true;
+                    } else if (!h && isHoveringDoor) {
+                        doorMaterial.color.setHex(doorNormalColor);
+                        isHoveringDoor = false;
+                    }
+                }
+                if (bossSpawned && (!boss || boss.dying) && !yellowDoorOpen && !yellowDoorOpening && yellowDoor) {
+                    const h = isYellowDoorUnderCrosshair();
+                    if (h && !isHoveringYellow) {
+                        yellowDoorMaterial.color.setHex(0xffff66);
+                        playRedDoorBeep();
+                        isHoveringYellow = true;
+                    } else if (!h && isHoveringYellow) {
+                        yellowDoorMaterial.color.setHex(0xdddd00);
+                        isHoveringYellow = false;
+                    }
+                }
+            }
+
+            if (!gameFrozen && !levelComplete) {
+                let nx = player.x, nz = player.z;
+                const ang = camera.rotation.y;
+                if (keys['w']||keys['arrowup'])    { nx -= Math.sin(ang)*player.speed; nz -= Math.cos(ang)*player.speed; }
+                if (keys['s']||keys['arrowdown'])  { nx += Math.sin(ang)*player.speed; nz += Math.cos(ang)*player.speed; }
+                if (keys['a']||keys['arrowleft'])  { nx -= Math.cos(ang)*player.speed; nz += Math.sin(ang)*player.speed; }
+                if (keys['d']||keys['arrowright']) { nx += Math.cos(ang)*player.speed; nz -= Math.sin(ang)*player.speed; }
+
+                if (!checkWallCollision(nx, player.z, player.radius)) player.x = nx;
+                if (!checkWallCollision(player.x, nz, player.radius)) player.z = nz;
+
+                const all = [...enemies];
+                if (boss) all.push(boss);
+                for (const e of all) {
+                    if (e.dying) continue;
+                    const dx = player.x - e.x, dz = player.z - e.z;
+                    const dist = Math.sqrt(dx*dx + dz*dz);
+                    if (dist < player.radius + e.radius) {
+                        const push = (player.radius + e.radius - dist) / dist;
+                        player.x += dx * push * 0.5;
+                        player.z += dz * push * 0.5;
+                    }
+                }
+
+                camera.position.set(player.x, 1.1, player.z);
+                updateEnemies(dt);
+
+                const hit = checkPlayerEnemyCollision();
+                if (hit && !noteGame.active) {
+                    touchingEnemy = hit;
+                    stopChaseMusic();
+                    duckTheme();
+                    playTouchChord();
+                    startNoteGame(hit.isBoss ? 'boss' : 'enemy', hit);
+                }
+            }
+
+            updateDying(now);
+            drawMinimap();
+            renderer.render(scene, camera);
+        }
+
+        // -------------------- Start --------------------
+        document.getElementById('startButton').addEventListener('click', () => {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('crosshair').style.display = 'block';
+            document.getElementById('minimapCanvas').style.display = 'block';
+            setLife(100);
+            generateMaze();
+            createMaze();
+            spawnEnemies();
+            themeAudio.currentTime = 0; themeAudio.volume = 0.5; themeAudio.play().catch(()=>{});
+            lastTime = performance.now();
+            animate(lastTime);
+            document.body.requestPointerLock();
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
