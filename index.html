@@ -42,14 +42,11 @@
             color: #ffd700; font-size: 48px; font-family: Arial, sans-serif; font-weight: bold;
             text-shadow: 0 0 20px #000; display: none; z-index: 35; text-align: center;
         }
-        /* ---- life bar ---- */
         #hud { position:absolute; top:0; left:0; padding:14px; padding-top:calc(14px + env(safe-area-inset-top,0px)); z-index:8; display:none; font-family:Arial,sans-serif; }
         #lifewrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #444; }
         #lifebar { height:100%; width:100%; background:#8fef8f; transition:width .3s,background .3s; }
         #lifelabel { font-size:.8rem; margin-top:4px; color:#ccc; }
-        /* ---- flash ---- */
         #flash { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:7; opacity:0; transition:opacity .12s; }
-        /* ---- note game ---- */
         #notegame { position:absolute; inset:0; z-index:25; display:none; flex-direction:column; align-items:center; justify-content:flex-end; background:rgba(0,0,0,.4); font-family:Arial,sans-serif; }
         #timerwrap { position:absolute; top:24px; right:24px; }
         #staffbox { background:rgba(15,12,10,.85); border-radius:14px; padding:14px; margin-bottom:8px; }
@@ -59,7 +56,6 @@
         .pkey.w { background:linear-gradient(180deg,#fdf9ee,#e8e0cc); border:1px solid #998; z-index:1; height:130px; }
         .pkey.b { background:linear-gradient(180deg,#222,#000); border:1px solid #000; z-index:2; height:82px; }
         .pkey:active { filter:brightness(.85); }
-        /* ---- game over ---- */
         #gameOverScreen {
             position:absolute; inset:0; z-index:40; display:none; flex-direction:column;
             align-items:center; justify-content:center; background:rgba(0,0,0,.9); color:#fff; font-family:Arial,sans-serif;
@@ -107,7 +103,6 @@
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // Easy maze for young kids
         const mazeWidth = 6;
         const mazeHeight = 6;
         const cellSize = 2.4;
@@ -124,7 +119,6 @@
         let maze = [];
         let walls = [];
 
-        // Red door
         let door = null;
         let doorMaterial = null;
         let doorPanelMaterials = [];
@@ -136,7 +130,6 @@
         const doorHoverColor  = 0xff3333;
         const doorWidth = 1.0;
 
-        // Yellow door + Boss
         let yellowDoor = null;
         let yellowDoorMaterial = null;
         let yellowDoorPanelMaterials = [];
@@ -162,7 +155,7 @@
         let touchingEnemy = null;
         let floorMatRef = null, ceilMatRef = null;
 
-        // -------------------- Audio --------------------
+        // -------------------- Audio context & SFX --------------------
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         function tone(freq, dur, type) {
@@ -242,24 +235,21 @@
         function startChaseMusic() {
             if (chaseMusicPlaying) return;
             chaseMusicPlaying = true;
-            // Stop theme while being chased
-            themeAudio.pause();
+            pauseMusic('theme');
             playChaseMusicLoop();
         }
         function stopChaseMusic() {
             chaseMusicPlaying = false;
             if (chaseMusicTimer) { clearTimeout(chaseMusicTimer); chaseMusicTimer = null; }
 
-            // Resume theme only when appropriate
             if (noteGame.active || levelComplete || life <= 0) return;
-            // Keep boss music during the boss phase
             if (bossSpawned && boss && !boss.dying) return;
-            if (!bossAudio.paused) return;
+            if (isMusicPlaying('boss')) return;
 
-            if (themeAudio.paused) {
-                themeAudio.volume = 0;
-                themeAudio.play().catch(() => {});
-                fadeInTheme();
+            if (!isMusicPlaying('theme')) {
+                setMusicVolume('theme', 0);
+                playMusic('theme');
+                fadeMusic('theme', 0.5, 1000);
             }
         }
 
@@ -294,40 +284,105 @@
             src.start();
         }
 
-        // -------------------- Background music --------------------
-        const themeAudio = new Audio('Theme Music.mp3');
-        themeAudio.volume = 0.5;
-        const bossAudio = new Audio('Boss Music.mp3');
-        bossAudio.volume = 0.5;
+        // -------------------- Gapless MP3 music via AudioBufferSourceNode --------------------
+        // Each track: decoded buffer + GainNode for volume. Source nodes are one-shot and
+        // recreated on play/resume; loop = true gives seamless looping.
+        const music = {
+            theme: { buffer: null, source: null, gain: null, playing: false, startedAt: 0, offset: 0 },
+            boss:  { buffer: null, source: null, gain: null, playing: false, startedAt: 0, offset: 0 }
+        };
 
-        // Gapless looping: restart a little before the natural end
-        function enableSeamlessLoop(audio) {
-            audio.addEventListener('timeupdate', () => {
-                if (audio.duration && !audio.paused && audio.currentTime > audio.duration - 0.12) {
-                    audio.currentTime = 0.02;
-                }
-            });
-            audio.addEventListener('ended', () => {
-                audio.currentTime = 0.02;
-                audio.play().catch(() => {});
-            });
-        }
-        enableSeamlessLoop(themeAudio);
-        enableSeamlessLoop(bossAudio);
-
-        function fadeAudio(el, to, ms) {
-            const from = el.volume, start = performance.now();
-            function step(t) {
-                const p = Math.min(1, (t - start) / ms);
-                el.volume = from + (to - from) * p;
-                if (p < 1) requestAnimationFrame(step);
+        async function loadMusicTrack(name, url) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Failed to load ' + url);
+            const arr = await res.arrayBuffer();
+            const buffer = await audioCtx.decodeAudioData(arr);
+            const track = music[name];
+            track.buffer = buffer;
+            if (!track.gain) {
+                track.gain = audioCtx.createGain();
+                track.gain.gain.value = 0.5;
+                track.gain.connect(audioCtx.destination);
             }
-            requestAnimationFrame(step);
         }
-        function duckTheme() { themeAudio.volume = 0; }
+
+        function isMusicPlaying(name) {
+            return music[name].playing;
+        }
+
+        function setMusicVolume(name, vol) {
+            const g = music[name].gain;
+            if (!g) return;
+            g.gain.cancelScheduledValues(audioCtx.currentTime);
+            g.gain.setValueAtTime(vol, audioCtx.currentTime);
+        }
+
+        function fadeMusic(name, to, ms) {
+            const g = music[name].gain;
+            if (!g) return;
+            const now = audioCtx.currentTime;
+            g.gain.cancelScheduledValues(now);
+            g.gain.setValueAtTime(g.gain.value, now);
+            g.gain.linearRampToValueAtTime(to, now + ms / 1000);
+        }
+
+        /** Stop source; optionally remember position for resume. */
+        function pauseMusic(name, saveOffset = true) {
+            const track = music[name];
+            if (track.source) {
+                if (saveOffset && track.playing && track.buffer) {
+                    const elapsed = audioCtx.currentTime - track.startedAt;
+                    track.offset = (track.offset + elapsed) % track.buffer.duration;
+                }
+                try { track.source.stop(); } catch (e) { /* already stopped */ }
+                try { track.source.disconnect(); } catch (e) {}
+                track.source = null;
+            }
+            track.playing = false;
+        }
+
+        /**
+         * Play (or resume) a looping track.
+         * @param {string} name
+         * @param {boolean} [fromStart=false] – if true, start at 0 instead of saved offset
+         */
+        function playMusic(name, fromStart = false) {
+            const track = music[name];
+            if (!track.buffer || !track.gain) return;
+
+            pauseMusic(name, !fromStart); // stop existing source; keep offset unless restarting
+
+            if (fromStart) track.offset = 0;
+
+            const src = audioCtx.createBufferSource();
+            src.buffer = track.buffer;
+            src.loop = true;
+            // Optional: if your MP3 has silence at the ends, trim here:
+            // src.loopStart = 0;
+            // src.loopEnd = track.buffer.duration;
+            src.connect(track.gain);
+
+            const offset = track.offset % track.buffer.duration;
+            src.start(0, offset);
+            track.source = src;
+            track.startedAt = audioCtx.currentTime;
+            track.playing = true;
+
+            src.onended = () => {
+                // Fires when stop() is called; ignore if we already replaced the source
+                if (track.source === src) {
+                    track.playing = false;
+                    track.source = null;
+                }
+            };
+        }
+
+        function duckTheme() {
+            setMusicVolume('theme', 0);
+        }
         function fadeInTheme() {
-            if (themeAudio.paused) themeAudio.play().catch(() => {});
-            fadeAudio(themeAudio, 0.5, 1000);
+            if (!isMusicPlaying('theme')) playMusic('theme');
+            fadeMusic('theme', 0.5, 1000);
         }
 
         // -------------------- Life bar / flash --------------------
@@ -353,7 +408,8 @@
             document.exitPointerLock();
             document.getElementById('crosshair').style.display = 'none';
             document.getElementById('gameOverScreen').style.display = 'flex';
-            themeAudio.pause(); bossAudio.pause();
+            pauseMusic('theme', false);
+            pauseMusic('boss', false);
         }
         document.getElementById('returnHomeButton').addEventListener('click', () => location.reload());
 
@@ -473,7 +529,6 @@
                 setLife(Math.min(100, life + 20));
                 playExplosionNoise();
                 const e = noteGame.ref; e.dying = true; e.dieStart = performance.now(); e.diePhase = 0;
-                // gameFrozen / crosshair / pointer-lock are restored by updateDying() once the death animation finishes
             } else if (noteGame.type === 'boss') {
                 setLife(100);
                 playExplosionNoise();
@@ -481,7 +536,7 @@
             }
         }
 
-        // -------------------- Maze generation – protect 2×2 start room --------------------
+        // -------------------- Maze generation --------------------
         function generateMaze() {
             maze = [];
             for (let x = 0; x < mazeWidth; x++) {
@@ -491,7 +546,6 @@
                 }
             }
 
-            // Open only the internal walls of the 2×2 start room
             maze[0][0].walls[1] = false; maze[1][0].walls[3] = false;
             maze[0][0].walls[2] = false; maze[0][1].walls[0] = false;
             maze[1][0].walls[2] = false; maze[1][1].walls[0] = false;
@@ -502,7 +556,6 @@
             maze[0][1].visited = true;
             maze[1][1].visited = true;
 
-            // Single forced exit (east of cell 1,1) – this is where the red door will sit
             maze[1][1].walls[1] = false;
             maze[2][1].walls[3] = false;
             maze[2][1].visited = true;
@@ -527,11 +580,10 @@
                 else break;
             }
 
-            // Extra openings for easy navigation – NEVER open into the start room
             for (let i = 0; i < 12; i++) {
                 const x = Math.floor(Math.random() * mazeWidth);
                 const z = Math.floor(Math.random() * mazeHeight);
-                if (x < 2 && z < 2) continue; // protect start room
+                if (x < 2 && z < 2) continue;
                 const dir = Math.floor(Math.random() * 4);
                 if (dir === 0 && z > 0 && !(x < 2 && z-1 < 2)) {
                     maze[x][z].walls[0] = false; maze[x][z-1].walls[2] = false;
@@ -543,10 +595,8 @@
                     maze[x][z].walls[3] = false; maze[x-1][z].walls[1] = false;
                 }
             }
-            // Note: yellow door is NOT pre-opened – it will replace an existing wall when the boss spawns
         }
 
-        // -------------------- Door panels (facing the INSIDE of the room) --------------------
         function addDoorPanels(parentGroup, width, height, thickness, isYellow = false) {
             const panelMat = new THREE.MeshStandardMaterial({
                 color: isYellow ? 0x888800 : 0x550000,
@@ -575,7 +625,6 @@
             });
         }
 
-        // -------------------- Create maze --------------------
         function createMaze() {
             while (scene.children.length) scene.remove(scene.children[0]);
             walls = [];
@@ -630,7 +679,6 @@
                 }
             }
 
-            // ----- Red door (only exit from 2×2 room) -----
             door = new THREE.Group();
             doorMaterial = new THREE.MeshStandardMaterial({
                 color: doorNormalColor, roughness: 0.55, transparent: true, opacity: 1
@@ -644,7 +692,6 @@
             door.position.set(2 * cellSize, wallHeight/2, 1 * cellSize + cellSize/2);
             scene.add(door);
 
-            // Side fillers so the rest of the wall is solid
             const sideW = (cellSize - doorWidth) / 2;
             const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
             const s1 = new THREE.Mesh(sideGeo, wallMat);
@@ -654,7 +701,6 @@
             s2.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 + doorWidth/2 + sideW/2);
             scene.add(s2); walls.push(s2);
 
-            // Bright lighting
             scene.add(new THREE.AmbientLight(0xffffff, 0.6));
             for (let x = 0; x < mazeWidth; x += 1.5) {
                 for (let z = 0; z < mazeHeight; z += 1.5) {
@@ -666,12 +712,11 @@
             scene.add(new THREE.HemisphereLight(0xffffff, 0xb0c4de, 0.45));
         }
 
-        // -------------------- Enemies & Boss --------------------
         function createEnemy(x, z, isBoss = false) {
             const group = new THREE.Group();
             const radius = isBoss ? 0.95 : ENEMY_RADIUS;
             const mat = new THREE.MeshStandardMaterial({
-                color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 0.75, roughness: 0.3
+                color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 0.75, metalness: 0.3
             });
             const sphere = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 16), mat);
             group.add(sphere);
@@ -736,31 +781,30 @@
             if (floorMatRef) { floorMatRef.color.setHex(0xff0000); floorMatRef.emissive.setHex(0x550000); }
             bossRedLight = new THREE.AmbientLight(0xff2222, 0.6);
             scene.add(bossRedLight);
-            themeAudio.pause();
-            bossAudio.currentTime = 0; bossAudio.volume = 0.5; bossAudio.play().catch(()=>{});
+            pauseMusic('theme', false);
+            setMusicVolume('boss', 0.5);
+            playMusic('boss', true);
         }
         function exitBossPhase() {
             if (ceilMatRef) ceilMatRef.color.setHex(ceilingColor);
             if (floorMatRef) { floorMatRef.color.setHex(floorColor); floorMatRef.emissive.setHex(0x000000); }
             if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
-            bossAudio.pause();
-            themeAudio.volume = 0; themeAudio.play().catch(()=>{});
-            fadeInTheme();
+            pauseMusic('boss', false);
+            setMusicVolume('theme', 0);
+            playMusic('theme', true);
+            fadeMusic('theme', 0.5, 1000);
         }
 
-        // Yellow door replaces an existing wall (no new side-filler walls created)
         function spawnBossAndYellowDoor() {
             if (bossSpawned) return;
             bossSpawned = true;
 
-            // Prefer a solid east wall in the far half of the maze
             const candidates = [];
             for (let x = Math.floor(mazeWidth / 2); x < mazeWidth - 1; x++) {
                 for (let z = 0; z < mazeHeight; z++) {
                     if (maze[x][z].walls[1]) candidates.push({ x, z });
                 }
             }
-            // Fallback: any east wall
             if (!candidates.length) {
                 for (let x = 0; x < mazeWidth - 1; x++) {
                     for (let z = 0; z < mazeHeight; z++) {
@@ -768,16 +812,15 @@
                     }
                 }
             }
-            if (!candidates.length) return; // extremely unlikely
+            if (!candidates.length) return;
 
             const pick = candidates[Math.floor(Math.random() * candidates.length)];
             const doorCellX = pick.x;
             const doorCellZ = pick.z;
 
-            const doorX = (doorCellX + 1) * cellSize;               // east edge of the cell
+            const doorX = (doorCellX + 1) * cellSize;
             const doorZ = doorCellZ * cellSize + cellSize / 2;
 
-            // Remove the existing wall mesh at this position
             for (let i = walls.length - 1; i >= 0; i--) {
                 const w = walls[i];
                 if (Math.abs(w.position.x - doorX) < 0.15 &&
@@ -788,22 +831,20 @@
                 }
             }
 
-            // Open maze connectivity so the player can walk through after the door opens
             maze[doorCellX][doorCellZ].walls[1] = false;
             if (doorCellX + 1 < mazeWidth) {
                 maze[doorCellX + 1][doorCellZ].walls[3] = false;
             }
 
-            // Yellow door – full cell width, so no side fillers are needed
             yellowDoor = new THREE.Group();
             yellowDoorMaterial = new THREE.MeshStandardMaterial({
-                color: 0xdddd00, roughness: 0.5, transparent: true, opacity: 1, side: THREE.FrontSide
+                color: 0xdddd00, metalness: 0.5, transparent: true, opacity: 1, side: THREE.FrontSide
             });
             const yMain = new THREE.Mesh(
                 new THREE.PlaneGeometry(cellSize * 0.98, wallHeight),
                 yellowDoorMaterial
             );
-            yMain.rotation.y = -Math.PI / 2; // faces into the maze (-X)
+            yMain.rotation.y = -Math.PI / 2;
             yellowDoor.add(yMain);
 
             const yBackMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
@@ -817,15 +858,13 @@
             yellowDoor.position.set(doorX, wallHeight / 2, doorZ);
             scene.add(yellowDoor);
 
-            // Boss stands in front of the door (inside the maze)
             const bossX = doorX - 1.4;
             const bossZ = doorZ;
             boss = createEnemy(bossX, bossZ, true);
-            boss.facing = Math.PI; // face toward -X
+            boss.facing = Math.PI;
             boss.group.rotation.y = boss.facing;
         }
 
-        // -------------------- Collision / vision --------------------
         function checkWallCollision(px, pz, radius) {
             const s = new THREE.Sphere(new THREE.Vector3(px, 1.0, pz), radius);
             for (const w of walls) {
@@ -899,7 +938,7 @@
         }
         function isYellowDoorUnderCrosshair() {
             if (!yellowDoor || yellowDoorOpen || yellowDoorOpening) return false;
-            if (boss && !boss.dying) return false; // only after Boss is gone
+            if (boss && !boss.dying) return false;
             raycaster.far = Infinity;
             raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
             return raycaster.intersectObject(yellowDoor, true).length > 0;
@@ -920,7 +959,6 @@
             }
         }
 
-        // -------------------- Input --------------------
         const keys = {};
         document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
@@ -943,7 +981,6 @@
             }
         });
 
-        // -------------------- AI --------------------
         function updateOneEnemy(e, dt) {
             if (e.dying) return false;
 
@@ -1014,7 +1051,6 @@
             if (any) startChaseMusic(); else stopChaseMusic();
         }
 
-        // -------------------- Death --------------------
         function updateDying(now) {
             const list = [...enemies];
             if (boss) list.push(boss);
@@ -1058,7 +1094,6 @@
             }
         }
 
-        // -------------------- Minimap --------------------
         function drawMinimap() {
             const canvas = document.getElementById('minimapCanvas');
             const ctx = canvas.getContext('2d');
@@ -1091,14 +1126,12 @@
             ctx.beginPath(); ctx.arc((player.x/cellSize)*cellPx, (player.z/cellSize)*cellPx, 5, 0, Math.PI*2); ctx.fill();
         }
 
-        // -------------------- Main loop --------------------
         let lastTime = performance.now();
         function animate(now) {
             requestAnimationFrame(animate);
             const dt = Math.min((now - lastTime)/1000, 0.05);
             lastTime = now;
 
-            // Red door + panels fade together
             if (doorOpening && door) {
                 const t = Math.min((now - doorOpenStartTime)/1000, 1);
                 doorMaterial.opacity = 1 - t;
@@ -1108,7 +1141,6 @@
                 }
             }
 
-            // Yellow door fade
             if (yellowDoorOpening && yellowDoor) {
                 const t = Math.min((now - yellowDoorOpenStartTime)/1000, 1);
                 yellowDoorMaterial.opacity = 1 - t;
@@ -1131,7 +1163,6 @@
             }
 
             if (!gameFrozen && !levelComplete) {
-                // Hover (any distance)
                 if (!doorOpen && !doorOpening && door) {
                     const h = isDoorUnderCrosshair();
                     if (h && !isHoveringDoor) {
@@ -1199,8 +1230,9 @@
         }
 
         // -------------------- Start --------------------
-        document.getElementById('startButton').addEventListener('click', () => {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
+        document.getElementById('startButton').addEventListener('click', async () => {
+            if (audioCtx.state === 'suspended') await audioCtx.resume();
+
             document.getElementById('startScreen').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
             document.getElementById('crosshair').style.display = 'block';
@@ -1209,7 +1241,19 @@
             generateMaze();
             createMaze();
             spawnEnemies();
-            themeAudio.currentTime = 0; themeAudio.volume = 0.5; themeAudio.play().catch(()=>{});
+
+            // Load & start theme with gapless Web Audio loop
+            try {
+                await Promise.all([
+                    loadMusicTrack('theme', 'Theme Music.mp3'),
+                    loadMusicTrack('boss', 'Boss Music.mp3')
+                ]);
+                setMusicVolume('theme', 0.5);
+                playMusic('theme', true);
+            } catch (err) {
+                console.warn('Music failed to load:', err);
+            }
+
             lastTime = performance.now();
             animate(lastTime);
             document.body.requestPointerLock();
