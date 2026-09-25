@@ -794,27 +794,22 @@
                 maze[doorCellX + 1][doorCellZ].walls[3] = false;
             }
 
-            // Single yellow plane, facing the boss (into the maze / -X).
-            // PlaneGeometry faces +Z by default; rotation.y = -π/2 → normal = -X.
+                        // Solid yellow door (box), visible from the boss / maze side
             yellowDoor = new THREE.Group();
             yellowDoorMaterial = new THREE.MeshStandardMaterial({
                 color: 0xdddd00,
-                emissive: 0x665500,
-                emissiveIntensity: 0.35,
-                metalness: 0.4,
+                emissive: 0x886600,
+                emissiveIntensity: 0.5,
+                metalness: 0.35,
                 roughness: 0.45,
                 transparent: true,
-                opacity: 1,
-                side: THREE.FrontSide
+                opacity: 1
             });
             const yMain = new THREE.Mesh(
-                new THREE.PlaneGeometry(cellSize * 0.98, wallHeight),
+                new THREE.BoxGeometry(wallThickness * 1.5, wallHeight, cellSize * 0.98),
                 yellowDoorMaterial
             );
-            yMain.rotation.y = -Math.PI / 2;
             yellowDoor.add(yMain);
-
-            // Nudge slightly toward the boss so it is clearly in front of the wall plane
             yellowDoor.position.set(doorX, wallHeight / 2, doorZ);
             scene.add(yellowDoor);
 
