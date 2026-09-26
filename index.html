@@ -38,14 +38,27 @@
             background: #000; opacity: 0; pointer-events: none; z-index: 30;
         }
         #levelCompleteText {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            position: absolute; top: 18%; left: 50%; transform: translate(-50%,-50%);
             color: #ffd700; font-size: 48px; font-family: Arial, sans-serif; font-weight: bold;
             text-shadow: 0 0 20px #000; display: none; z-index: 35; text-align: center;
+            pointer-events: none;
         }
         #hud { position:absolute; top:0; left:0; padding:14px; padding-top:calc(14px + env(safe-area-inset-top,0px)); z-index:8; display:none; font-family:Arial,sans-serif; }
         #lifewrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #444; }
         #lifebar { height:100%; width:100%; background:#8fef8f; transition:width .3s,background .3s; }
         #lifelabel { font-size:.8rem; margin-top:4px; color:#ccc; }
+        /* Boss life bar */
+        #bosswrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #662222; margin-top:10px; display:none; }
+        #bossbar { height:100%; width:100%; background:#e03333; transition:width .35s; }
+        #bosslabel { font-size:.8rem; margin-top:4px; color:#e88; display:none; }
+        #bosswrap.jiggle { animation: jiggle .45s ease; }
+        @keyframes jiggle {
+            0%,100% { transform: translateX(0); }
+            20% { transform: translateX(-6px); }
+            40% { transform: translateX(6px); }
+            60% { transform: translateX(-4px); }
+            80% { transform: translateX(4px); }
+        }
         #flash { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:7; opacity:0; transition:opacity .12s; }
         #notegame { position:absolute; inset:0; z-index:25; display:none; flex-direction:column; align-items:center; justify-content:flex-end; background:rgba(0,0,0,.4); font-family:Arial,sans-serif; }
         #timerwrap { position:absolute; top:24px; right:24px; }
@@ -78,12 +91,17 @@
         </div>
     </div>
 
-    <div id="hud"><div id="lifewrap"><div id="lifebar"></div></div><div id="lifelabel">Life 100/100</div></div>
+    <div id="hud">
+        <div id="lifewrap"><div id="lifebar"></div></div>
+        <div id="lifelabel">Life 100/100</div>
+        <div id="bosswrap"><div id="bossbar"></div></div>
+        <div id="bosslabel">Boss 4/4</div>
+    </div>
     <div id="crosshair"></div>
     <canvas id="minimapCanvas" width="160" height="160"></canvas>
     <div id="flash"></div>
     <div id="fadeOverlay"></div>
-    <div id="levelCompleteText">Level 1 Complete!</div>
+    <div id="levelCompleteText">You Beat The Game!</div>
 
     <div id="notegame">
       <svg id="timerwrap" width="70" height="70"><circle cx="35" cy="35" r="30" stroke="#333" stroke-width="6" fill="none"/><circle id="timerring" cx="35" cy="35" r="30" stroke="#3fa9dc" stroke-width="6" fill="none" stroke-dasharray="188" stroke-dashoffset="0" transform="rotate(-90 35 35)"/></svg>
@@ -131,12 +149,15 @@
         const doorHoverColor  = 0xff3333;
         const doorWidth = 1.0;
 
-        // Boss (no yellow door)
+        // Boss
         let boss = null;
         let bossSpawned = false;
         let levelComplete = false;
-        let fadeStartTime = 0;
-        let fadingToBlack = false;
+        const BOSS_MAX_LIFE = 4;
+        let bossLife = BOSS_MAX_LIFE;
+
+        // 160° field of view (half-angle 80°)
+        const FOV_DOT = Math.cos(80 * Math.PI / 180); // ≈ 0.1736
 
         const wallColor = 0x800080;
         const floorColor = 0x0000ff;
@@ -238,7 +259,7 @@
             chaseMusicPlaying = false;
             if (chaseMusicTimer) { clearTimeout(chaseMusicTimer); chaseMusicTimer = null; }
 
-            if (noteGame.active || levelComplete || life <= 0) return;
+            if (noteGame.active || life <= 0) return;
             if (bossSpawned && boss && !boss.dying) return;
             if (!bossAudio.paused) return;
 
@@ -285,6 +306,8 @@
         themeAudio.volume = 0.5;
         const bossAudio = new Audio('Boss Music.mp3');
         bossAudio.volume = 0.5;
+        const fanfareAudio = new Audio('Fanfare.mp3');
+        fanfareAudio.volume = 0.7;
 
         function enableSeamlessLoop(audio) {
             audio.addEventListener('timeupdate', () => {
@@ -315,7 +338,7 @@
             fadeAudio(themeAudio, 0.5, 1000);
         }
 
-        // -------------------- Life bar / flash --------------------
+        // -------------------- Life bars --------------------
         let life = 100;
         function setLife(v) {
             life = Math.max(0, Math.min(100, v));
@@ -323,6 +346,28 @@
             document.getElementById('lifebar').style.background = 'hsl(' + Math.round(life*1.2) + ',75%,55%)';
             document.getElementById('lifelabel').textContent = 'Life ' + life + '/100';
             if (life <= 0) doGameOver();
+        }
+        function setBossLife(v) {
+            bossLife = Math.max(0, Math.min(BOSS_MAX_LIFE, v));
+            const pct = (bossLife / BOSS_MAX_LIFE) * 100;
+            document.getElementById('bossbar').style.width = pct + '%';
+            document.getElementById('bosslabel').textContent = 'Boss ' + bossLife + '/' + BOSS_MAX_LIFE;
+        }
+        function showBossLifeBar() {
+            document.getElementById('bosswrap').style.display = 'block';
+            document.getElementById('bosslabel').style.display = 'block';
+            setBossLife(BOSS_MAX_LIFE);
+        }
+        function hideBossLifeBar() {
+            document.getElementById('bosswrap').style.display = 'none';
+            document.getElementById('bosslabel').style.display = 'none';
+        }
+        function jiggleBossBar() {
+            const el = document.getElementById('bosswrap');
+            el.classList.remove('jiggle');
+            void el.offsetWidth; // restart animation
+            el.classList.add('jiggle');
+            setTimeout(() => el.classList.remove('jiggle'), 500);
         }
         function flash(kind) {
             const f = document.getElementById('flash');
@@ -402,7 +447,10 @@
             noteGame.type = type;
             noteGame.ref = ref || null;
             stopChaseMusic();
-            themeAudio.pause();
+            // First note game (red door) keeps Theme Music playing
+            if (type !== 'door1') {
+                themeAudio.pause();
+            }
             noteGame.seq = genSeq(type==='boss' ? 8 : 4);
             document.getElementById('notegame').style.display = 'flex';
             document.getElementById('timerwrap').style.visibility = (type==='door1') ? 'hidden' : 'visible';
@@ -457,19 +505,29 @@
                 gameFrozen = false;
                 document.getElementById('crosshair').style.display = 'block';
                 document.body.requestPointerLock();
-                if (!chaseMusicPlaying && bossAudio.paused) {
-                    themeAudio.volume = 0;
-                    themeAudio.play().catch(() => {});
-                    fadeInTheme();
-                }
+                // Theme was never stopped for door1
             } else if (noteGame.type === 'enemy') {
                 setLife(Math.min(100, life + 20));
                 playExplosionNoise();
                 const e = noteGame.ref; e.dying = true; e.dieStart = performance.now(); e.diePhase = 0;
             } else if (noteGame.type === 'boss') {
-                setLife(100);
+                // Damage boss by 1/4
+                setBossLife(bossLife - 1);
+                jiggleBossBar();
                 playExplosionNoise();
-                const b = noteGame.ref; b.dying = true; b.dieStart = performance.now(); b.diePhase = 0;
+                const b = noteGame.ref;
+                if (bossLife <= 0) {
+                    // Final hit – boss dies
+                    b.dying = true; b.dieStart = performance.now(); b.diePhase = 0;
+                } else {
+                    // Freeze boss for 3 seconds; player can run away
+                    b.frozenUntil = performance.now() + 3000;
+                    b.isChasing = false;
+                    gameFrozen = false;
+                    touchingEnemy = null;
+                    document.getElementById('crosshair').style.display = 'block';
+                    document.body.requestPointerLock();
+                }
             }
         }
 
@@ -564,9 +622,11 @@
             walls = [];
             door = null; doorOpen = false; doorOpening = false; isHoveringDoor = false;
             doorPanelMaterials = [];
-            boss = null; bossSpawned = false;
+            boss = null; bossSpawned = false; bossLife = BOSS_MAX_LIFE;
             enemies = []; gameFrozen = false; touchingEnemy = null;
-            levelComplete = false; fadingToBlack = false;
+            levelComplete = false;
+            hideBossLifeBar();
+            document.getElementById('levelCompleteText').style.display = 'none';
 
             const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
             const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
@@ -615,7 +675,6 @@
                 }
             }
 
-            // Red door
             door = new THREE.Group();
             doorMaterial = new THREE.MeshStandardMaterial({
                 color: doorNormalColor, roughness: 0.55, transparent: true, opacity: 1
@@ -693,7 +752,8 @@
                 x, z, radius, facing: angle,
                 isChasing: false, wanderTimer: 0, turning: false, turnDir: 1,
                 dying: false, dieStart: 0, diePhase: 0, isBoss,
-                lookDir: Math.random() < 0.5 ? 1 : -1
+                lookDir: Math.random() < 0.5 ? 1 : -1,
+                frozenUntil: 0
             };
         }
 
@@ -732,7 +792,6 @@
             bossAudio.pause();
         }
 
-        // Remove all interior walls; keep only the outer boundary
         function clearInteriorWalls() {
             for (let i = walls.length - 1; i >= 0; i--) {
                 const w = walls[i];
@@ -741,7 +800,6 @@
                     walls.splice(i, 1);
                 }
             }
-            // Remove red door (it was interior)
             if (door) {
                 scene.remove(door);
                 door = null;
@@ -749,7 +807,6 @@
                 doorOpening = false;
                 isHoveringDoor = false;
             }
-            // Update maze data for minimap: only outer walls remain
             for (let x = 0; x < mazeWidth; x++) {
                 for (let z = 0; z < mazeHeight; z++) {
                     maze[x][z].walls = [false, false, false, false];
@@ -765,13 +822,13 @@
             }
         }
 
-        // After last roving enemy: clear interior, spawn boss in center
         function spawnBossArena() {
             if (bossSpawned) return;
             bossSpawned = true;
 
             clearInteriorWalls();
             enterBossPhase();
+            showBossLifeBar();
 
             const bossX = (mazeWidth * cellSize) / 2;
             const bossZ = (mazeHeight * cellSize) / 2;
@@ -780,6 +837,9 @@
             boss.facing = Math.random() * Math.PI * 2;
             boss.group.rotation.y = boss.facing;
             boss.lookDir = Math.random() < 0.5 ? 1 : -1;
+            boss.frozenUntil = 0;
+            bossLife = BOSS_MAX_LIFE;
+            setBossLife(BOSS_MAX_LIFE);
         }
 
         // -------------------- Collision / vision --------------------
@@ -801,6 +861,8 @@
                 if (Math.sqrt(dx*dx + dz*dz) < player.radius + e.radius) return e;
             }
             if (boss && !boss.dying) {
+                // Don't re-trigger while frozen
+                if (performance.now() < (boss.frozenUntil || 0)) return null;
                 const dx = player.x - boss.x, dz = player.z - boss.z;
                 if (Math.sqrt(dx*dx + dz*dz) < player.radius + boss.radius) return boss;
             }
@@ -830,15 +892,16 @@
             return blocked(e.facing + 0.6) && blocked(e.facing - 0.6);
         }
 
+        // 160° sector vision: player must be within ±80° of facing, and
+        // the ray from enemy center to player must not hit a wall first.
         function canSeePlayer(e) {
             const dx = player.x - e.x, dz = player.z - e.z;
             const dist = Math.sqrt(dx*dx + dz*dz);
             if (dist > 30 || dist < 0.15) return false;
             const dirX = dx/dist, dirZ = dz/dist;
             const fx = Math.sin(e.facing), fz = Math.cos(e.facing);
-            // Boss uses a slightly wider FOV while scanning
-            const fovDot = e.isBoss ? 0.75 : 0.82;
-            if (fx*dirX + fz*dirZ < fovDot) return false;
+            // Dot product ≥ cos(80°) ⇒ within 160° FOV
+            if (fx*dirX + fz*dirZ < FOV_DOT) return false;
             const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
             const direction = new THREE.Vector3(dirX, 0, dirZ).normalize();
             raycaster.set(origin, direction); raycaster.far = dist;
@@ -855,7 +918,7 @@
         }
 
         function tryOpenDoor() {
-            if (gameFrozen || levelComplete || noteGame.active) return;
+            if (gameFrozen || noteGame.active) return;
             if (isDoorUnderCrosshair()) {
                 startNoteGame('door1', null);
             }
@@ -869,13 +932,13 @@
         document.addEventListener('click', () => {
             if (document.pointerLockElement === document.body) {
                 tryOpenDoor();
-            } else if (!gameFrozen && !levelComplete && !noteGame.active) {
+            } else if (!gameFrozen && !noteGame.active) {
                 document.body.requestPointerLock();
             }
         });
 
         document.addEventListener('mousemove', e => {
-            if (document.pointerLockElement === document.body && !gameFrozen && !levelComplete) {
+            if (document.pointerLockElement === document.body && !gameFrozen) {
                 yaw   -= e.movementX * mouseSensitivity;
                 pitch -= e.movementY * mouseSensitivity;
                 pitch = Math.max(-Math.PI/2+0.1, Math.min(Math.PI/2-0.1, pitch));
@@ -888,7 +951,15 @@
         function updateOneEnemy(e, dt) {
             if (e.dying) return false;
 
-            // ----- Boss: look around until it faces the player, then chase -----
+            // Boss frozen after a successful note-game hit
+            if (e.isBoss && performance.now() < (e.frozenUntil || 0)) {
+                e.isChasing = false;
+                e.group.position.set(e.x, e.radius + 0.05, e.z);
+                e.group.rotation.y = e.facing;
+                return false;
+            }
+
+            // Boss: look around until it sees the player in its 160° FOV
             if (e.isBoss) {
                 if (!e.isChasing) {
                     e.facing += e.lookDir * BOSS_LOOK_SPEED;
@@ -899,7 +970,6 @@
                     }
                     return false;
                 }
-                // Chasing: move toward player
                 const speed = ENEMY_FAST_SPEED * 1.15;
                 const dx = player.x - e.x, dz = player.z - e.z;
                 const d = Math.sqrt(dx*dx + dz*dz) || 0.001;
@@ -917,7 +987,7 @@
                 return true;
             }
 
-            // ----- Normal enemies -----
+            // Normal enemies – 160° vision
             e.isChasing = canSeePlayer(e);
 
             const tooClose = !canSeeAhead(e, cellSize * 0.2);
@@ -995,9 +1065,21 @@
                         if (e.isBoss) {
                             boss = null;
                             exitBossPhase();
-                            // Level complete after boss is defeated
-                            fadingToBlack = true;
-                            fadeStartTime = performance.now();
+                            hideBossLifeBar();
+                            // Victory – no freeze, no fade to black
+                            document.getElementById('levelCompleteText').textContent = 'You Beat The Game!';
+                            document.getElementById('levelCompleteText').style.display = 'block';
+                            levelComplete = true;
+                            stopChaseMusic();
+                            fanfareAudio.currentTime = 0;
+                            fanfareAudio.play().catch(() => {});
+                            // Restore control if we were mid note-game recovery
+                            if (touchingEnemy === e) {
+                                touchingEnemy = null;
+                                gameFrozen = false;
+                                document.getElementById('crosshair').style.display = 'block';
+                                document.body.requestPointerLock();
+                            }
                         } else {
                             enemies = enemies.filter(en => en !== e);
                             if (enemies.length === 0 && !bossSpawned) {
@@ -1005,13 +1087,13 @@
                             } else {
                                 fadeInTheme();
                             }
-                        }
-                        if (touchingEnemy === e) {
-                            touchingEnemy = null;
-                            gameFrozen = false;
-                            stopChaseMusic();
-                            document.getElementById('crosshair').style.display = 'block';
-                            document.body.requestPointerLock();
+                            if (touchingEnemy === e) {
+                                touchingEnemy = null;
+                                gameFrozen = false;
+                                stopChaseMusic();
+                                document.getElementById('crosshair').style.display = 'block';
+                                document.body.requestPointerLock();
+                            }
                         }
                     }
                 }
@@ -1067,22 +1149,7 @@
                 }
             }
 
-            if (fadingToBlack) {
-                const t = Math.min((now - fadeStartTime)/1000, 1);
-                document.getElementById('fadeOverlay').style.opacity = t;
-                if (t >= 1) {
-                    fadingToBlack = false;
-                    levelComplete = true;
-                    document.getElementById('levelCompleteText').style.display = 'block';
-                    document.exitPointerLock();
-                    document.getElementById('crosshair').style.display = 'none';
-                    themeAudio.pause();
-                    bossAudio.pause();
-                    stopChaseMusic();
-                }
-            }
-
-            if (!gameFrozen && !levelComplete) {
+            if (!gameFrozen) {
                 if (!doorOpen && !doorOpening && door) {
                     const h = isDoorUnderCrosshair();
                     if (h && !isHoveringDoor) {
@@ -1096,7 +1163,8 @@
                 }
             }
 
-            if (!gameFrozen && !levelComplete) {
+            // Movement stays available after victory (levelComplete does not freeze)
+            if (!gameFrozen) {
                 let nx = player.x, nz = player.z;
                 const ang = camera.rotation.y;
                 if (keys['w']||keys['arrowup'])    { nx -= Math.sin(ang)*player.speed; nz -= Math.cos(ang)*player.speed; }
@@ -1127,7 +1195,11 @@
                 if (hit && !noteGame.active) {
                     touchingEnemy = hit;
                     stopChaseMusic();
-                    duckTheme();
+                    if (hit.isBoss) {
+                        // boss music keeps playing; just duck isn't needed
+                    } else {
+                        duckTheme();
+                    }
                     playTouchChord();
                     startNoteGame(hit.isBoss ? 'boss' : 'enemy', hit);
                 }
