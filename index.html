@@ -209,7 +209,7 @@
         let gameFrozen = false;
         let touchingEnemy = null;
         let floorMatRef = null, ceilMatRef = null;
-        let themeAllowed = true; // set false after victory so theme never returns
+        let themeAllowed = true;
 
         // -------------------- Audio --------------------
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -494,11 +494,13 @@
             if (type !== 'door1') {
                 themeAudio.pause();
             }
-            noteGame.seq = genSeq(type==='boss' ? 8 : 4);
+            // Door, enemy, and boss all use 4 notes
+            noteGame.seq = genSeq(4);
             document.getElementById('notegame').style.display = 'flex';
             document.getElementById('timerwrap').style.visibility = (type==='door1') ? 'hidden' : 'visible';
             renderStaff();
-            if (type !== 'door1') startCountdown(type==='boss' ? 18 : 12); else clearCountdown();
+            // Boss: 8 second countdown; normal enemies: 12 seconds
+            if (type !== 'door1') startCountdown(type==='boss' ? 8 : 12); else clearCountdown();
         }
         function startCountdown(sec) {
             clearCountdown();
@@ -518,8 +520,8 @@
             if (noteGame.type === 'door1') return;
             if (life - 20 < 0) { setLife(0); return; }
             setLife(life - 20); sfxWrong(); flash('bad');
-            noteGame.seq = genSeq(noteGame.type==='boss' ? 8 : 4); renderStaff();
-            startCountdown(noteGame.type==='boss' ? 18 : 12);
+            noteGame.seq = genSeq(4); renderStaff();
+            startCountdown(noteGame.type==='boss' ? 8 : 12);
         }
         function handleNotePlayed(name) {
             if (!noteGame.active) return;
@@ -532,9 +534,9 @@
                 if (noteGame.type !== 'door1') {
                     if (life - 10 <= 0) { setLife(0); return; }
                     setLife(life - 10);
-                    startCountdown(noteGame.type==='boss' ? 18 : 12);
+                    startCountdown(noteGame.type==='boss' ? 8 : 12);
                 }
-                noteGame.seq = genSeq(noteGame.type==='boss' ? 8 : 4); renderStaff();
+                noteGame.seq = genSeq(4); renderStaff();
             }
         }
         function endNoteGame(success) {
@@ -782,7 +784,10 @@
 
             const yPos = isBoss ? radius + 0.05 : 1.0;
             group.position.set(x, yPos, z);
-            const angle = Math.random() * Math.PI * 2;
+            // Start facing a cardinal corridor direction
+            const angle = isBoss
+                ? Math.random() * Math.PI * 2
+                : Math.floor(Math.random() * 4) * (Math.PI / 2);
             group.rotation.y = angle;
             scene.add(group);
 
@@ -829,7 +834,6 @@
             if (floorMatRef) { floorMatRef.color.setHex(floorColor); floorMatRef.emissive.setHex(0x000000); }
             if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
             bossAudio.pause();
-            // Do NOT restart theme after boss – only Fanfare on victory
         }
 
         function clearInteriorWalls() {
@@ -866,7 +870,6 @@
             if (bossSpawned) return;
             bossSpawned = true;
 
-            // Hide minimap when boss phase begins
             document.getElementById('minimapCanvas').style.display = 'none';
 
             clearInteriorWalls();
@@ -920,17 +923,33 @@
             return hits.length === 0 || hits[0].distance >= dist - 0.05;
         }
 
-        function isFacingCorner(e) {
-            const short = cellSize * 0.35;
-            if (canSeeAhead(e, short)) return false;
-            const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
-            function blocked(f) {
-                const dir = new THREE.Vector3(Math.sin(f), 0, Math.cos(f)).normalize();
-                raycaster.set(origin, dir); raycaster.far = short;
-                const hits = raycaster.intersectObjects(walls);
-                return hits.length > 0 && hits[0].distance < short;
+        function snapCardinal(f) {
+            const step = Math.PI / 2;
+            return Math.round(f / step) * step;
+        }
+
+        function pickOpenCardinal(ent) {
+            const dirs = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+            for (let i = dirs.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
             }
-            return blocked(e.facing + 0.6) && blocked(e.facing - 0.6);
+            const open = [];
+            for (const d of dirs) {
+                const saved = ent.facing;
+                ent.facing = d;
+                const ok = canSeeAhead(ent, cellSize * 0.45);
+                ent.facing = saved;
+                if (ok) open.push(d);
+            }
+            if (!open.length) return snapCardinal(ent.facing);
+            const forward = snapCardinal(ent.facing);
+            const preferred = open.filter(d => {
+                let diff = Math.abs(((d - forward + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+                return diff < Math.PI * 0.6;
+            });
+            const pool = preferred.length ? preferred : open;
+            return pool[Math.floor(Math.random() * pool.length)];
         }
 
         function canSeePlayer(e) {
@@ -967,7 +986,7 @@
         document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
 
         document.addEventListener('click', () => {
-            if (levelComplete) return; // cursor free after victory
+            if (levelComplete) return;
             if (document.pointerLockElement === document.body) {
                 tryOpenDoor();
             } else if (!gameFrozen && !noteGame.active) {
@@ -996,6 +1015,7 @@
                 return false;
             }
 
+            // ----- Boss -----
             if (e.isBoss) {
                 if (!e.isChasing) {
                     e.facing += e.lookDir * BOSS_LOOK_SPEED;
@@ -1023,51 +1043,55 @@
                 return true;
             }
 
+            // ----- Normal enemies -----
             e.isChasing = canSeePlayer(e);
 
-            const tooClose = !canSeeAhead(e, cellSize * 0.2);
-            const corner = isFacingCorner(e);
-
-            if (e.turning || tooClose || corner) {
-                if (!e.turning) {
-                    e.turning = true;
-                    e.turnDir = Math.random() < 0.5 ? 1 : -1;
-                }
-                e.facing += e.turnDir * 0.14;
-                if (canSeeAhead(e, cellSize) && !isFacingCorner(e)) e.turning = false;
-                e.group.rotation.y = e.facing;
-                e.group.position.set(e.x, 1.0, e.z);
-                return e.isChasing;
-            }
-
-            const speed = e.isChasing ? ENEMY_FAST_SPEED : ENEMY_SLOW_SPEED;
-            let moveX = 0, moveZ = 0;
             if (e.isChasing) {
+                const speed = ENEMY_FAST_SPEED;
                 const dx = player.x - e.x, dz = player.z - e.z;
                 const d = Math.sqrt(dx*dx + dz*dz) || 0.001;
-                moveX = (dx/d)*speed; moveZ = (dz/d)*speed;
+                const moveX = (dx/d)*speed, moveZ = (dz/d)*speed;
                 e.facing = Math.atan2(dx, dz);
-            } else {
-                e.wanderTimer -= dt;
-                if (e.wanderTimer <= 0) {
-                    e.facing += (Math.random()-0.5)*1.4;
-                    e.wanderTimer = 2 + Math.random()*2.5;
-                }
-                moveX = Math.sin(e.facing)*speed;
-                moveZ = Math.cos(e.facing)*speed;
+
+                let newX = e.x + moveX, newZ = e.z + moveZ;
+                if (!checkWallCollision(newX, e.z, e.radius)) e.x = newX;
+                if (!checkWallCollision(e.x, newZ, e.radius)) e.z = newZ;
+
+                e.x = Math.max(0.6, Math.min(mazeWidth*cellSize-0.6, e.x));
+                e.z = Math.max(0.6, Math.min(mazeHeight*cellSize-0.6, e.z));
+                e.group.position.set(e.x, 1.0, e.z);
+                e.group.rotation.y = e.facing;
+                return true;
             }
 
-            let newX = e.x + moveX, newZ = e.z + moveZ;
-            let hit = false;
-            if (!checkWallCollision(newX, e.z, e.radius)) e.x = newX; else hit = true;
-            if (!checkWallCollision(e.x, newZ, e.radius)) e.z = newZ; else hit = true;
-            if (hit) { e.turning = true; e.turnDir = Math.random()<0.5 ? 1 : -1; }
+            // Wander: face down corridors (cardinal), turn only when blocked
+            e.facing = snapCardinal(e.facing);
+
+            if (!canSeeAhead(e, cellSize * 0.35)) {
+                e.facing = pickOpenCardinal(e);
+                e.group.rotation.y = e.facing;
+                e.group.position.set(e.x, 1.0, e.z);
+                return false;
+            }
+
+            const speed = ENEMY_SLOW_SPEED;
+            const moveX = Math.sin(e.facing) * speed;
+            const moveZ = Math.cos(e.facing) * speed;
+            const newX = e.x + moveX, newZ = e.z + moveZ;
+
+            // Full step must be free — no sliding along walls while facing into them
+            if (!checkWallCollision(newX, newZ, e.radius)) {
+                e.x = newX;
+                e.z = newZ;
+            } else {
+                e.facing = pickOpenCardinal(e);
+            }
 
             e.x = Math.max(0.6, Math.min(mazeWidth*cellSize-0.6, e.x));
             e.z = Math.max(0.6, Math.min(mazeHeight*cellSize-0.6, e.z));
             e.group.position.set(e.x, 1.0, e.z);
             e.group.rotation.y = e.facing;
-            return e.isChasing;
+            return false;
         }
 
         function updateEnemies(dt) {
@@ -1100,7 +1124,6 @@
                             boss = null;
                             exitBossPhase();
                             hideBossLifeBar();
-                            // Victory
                             themeAllowed = false;
                             themeAudio.pause();
                             stopChaseMusic();
