@@ -9,16 +9,50 @@
         canvas { display: block; }
         #startScreen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85); display: flex; flex-direction: column;
+            background: linear-gradient(160deg, #5a1a7a 0%, #3a0a5a 40%, #1a2a6a 100%);
+            display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 10;
-            color: #fff; font-family: Arial, sans-serif;
+            color: #fff; font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        #startScreen::before {
+            content: '';
+            position: absolute; inset: 0;
+            background:
+                radial-gradient(circle at 20% 30%, rgba(173,216,230,0.15) 0%, transparent 40%),
+                radial-gradient(circle at 80% 70%, rgba(128,0,128,0.25) 0%, transparent 45%);
+            pointer-events: none;
+        }
+        #gameTitle {
+            font-size: 3rem; font-weight: bold; margin-bottom: 8px;
+            color: #ffd700;
+            text-shadow: 0 0 24px rgba(255,215,0,0.5), 3px 3px 0 #5a1a7a;
+            letter-spacing: 1px; z-index: 1;
+        }
+        #startTagline {
+            font-size: 1.25rem; color: #add8e6; margin-bottom: 28px;
+            text-align: center; max-width: 420px; line-height: 1.5; z-index: 1;
         }
         #startButton {
-            padding: 18px 36px; font-size: 22px; cursor: pointer;
-            background: #800080; color: #fff; border: none; border-radius: 6px; margin-bottom: 20px;
+            padding: 18px 48px; font-size: 24px; cursor: pointer;
+            background: linear-gradient(180deg, #b040c0, #800080);
+            color: #fff; border: 3px solid #e6d8ad; border-radius: 16px;
+            margin-bottom: 16px; font-weight: bold;
+            box-shadow: 0 6px 0 #4a0a5a, 0 8px 20px rgba(0,0,0,0.35);
+            transition: transform 0.1s, box-shadow 0.1s; z-index: 1;
         }
-        #startButton:hover { background: #9b30a0; }
-        #startInstructions { font-size: 16px; text-align: center; line-height: 1.6; color: #ccc; }
+        #startButton:hover {
+            background: linear-gradient(180deg, #c050d0, #9b30a0);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 0 #4a0a5a, 0 10px 24px rgba(0,0,0,0.4);
+        }
+        #startButton:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 #4a0a5a, 0 4px 10px rgba(0,0,0,0.3);
+        }
+        #startDecor {
+            font-size: 2.2rem; margin-bottom: 12px; z-index: 1;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+        }
         #crosshair {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
             width: 20px; height: 20px; pointer-events: none; z-index: 5; display: none;
@@ -43,11 +77,21 @@
             text-shadow: 0 0 20px #000; display: none; z-index: 35; text-align: center;
             pointer-events: none;
         }
+        #victoryHomeButton {
+            position: absolute; top: 32%; left: 50%; transform: translate(-50%,0);
+            padding: 14px 36px; font-size: 20px; cursor: pointer;
+            background: linear-gradient(180deg, #b040c0, #800080);
+            color: #fff; border: 2px solid #e6d8ad; border-radius: 12px;
+            font-weight: bold; z-index: 36; display: none;
+            box-shadow: 0 4px 0 #4a0a5a, 0 6px 16px rgba(0,0,0,0.35);
+        }
+        #victoryHomeButton:hover {
+            background: linear-gradient(180deg, #c050d0, #9b30a0);
+        }
         #hud { position:absolute; top:0; left:0; padding:14px; padding-top:calc(14px + env(safe-area-inset-top,0px)); z-index:8; display:none; font-family:Arial,sans-serif; }
         #lifewrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #444; }
         #lifebar { height:100%; width:100%; background:#8fef8f; transition:width .3s,background .3s; }
         #lifelabel { font-size:.8rem; margin-top:4px; color:#ccc; }
-        /* Boss life bar */
         #bosswrap { width:240px; height:22px; background:#222; border-radius:11px; overflow:hidden; border:1px solid #662222; margin-top:10px; display:none; }
         #bossbar { height:100%; width:100%; background:#e03333; transition:width .35s; }
         #bosslabel { font-size:.8rem; margin-top:4px; color:#e88; display:none; }
@@ -80,28 +124,24 @@
 </head>
 <body>
     <div id="startScreen">
+        <div id="startDecor">🎵 🏰 🎵</div>
+        <div id="gameTitle">Music Maze</div>
+        <div id="startTagline">Play the music notes to defeat the enemies!</div>
         <button id="startButton">Start Game</button>
-        <div id="startInstructions">
-            Click to lock cursor<br>
-            Press Esc to unlock cursor<br>
-            WASD / Arrow keys to move<br>
-            Look at the red door and click to open it<br>
-            Avoid the angry red spheres!<br>
-            Minimap is in the lower-left corner
-        </div>
     </div>
 
     <div id="hud">
         <div id="lifewrap"><div id="lifebar"></div></div>
         <div id="lifelabel">Life 100/100</div>
         <div id="bosswrap"><div id="bossbar"></div></div>
-        <div id="bosslabel">Boss 4/4</div>
+        <div id="bosslabel">Boss 100/100</div>
     </div>
     <div id="crosshair"></div>
     <canvas id="minimapCanvas" width="160" height="160"></canvas>
     <div id="flash"></div>
     <div id="fadeOverlay"></div>
     <div id="levelCompleteText">You Beat The Game!</div>
+    <button id="victoryHomeButton">Return Home</button>
 
     <div id="notegame">
       <svg id="timerwrap" width="70" height="70"><circle cx="35" cy="35" r="30" stroke="#333" stroke-width="6" fill="none"/><circle id="timerring" cx="35" cy="35" r="30" stroke="#3fa9dc" stroke-width="6" fill="none" stroke-dasharray="188" stroke-dashoffset="0" transform="rotate(-90 35 35)"/></svg>
@@ -137,7 +177,6 @@
         let maze = [];
         let walls = [];
 
-        // Red door
         let door = null;
         let doorMaterial = null;
         let doorPanelMaterials = [];
@@ -149,15 +188,14 @@
         const doorHoverColor  = 0xff3333;
         const doorWidth = 1.0;
 
-        // Boss
         let boss = null;
         let bossSpawned = false;
         let levelComplete = false;
-        const BOSS_MAX_LIFE = 4;
+        const BOSS_MAX_LIFE = 100;
+        const BOSS_HIT_DAMAGE = 25;
         let bossLife = BOSS_MAX_LIFE;
 
-        // 160° field of view (half-angle 80°)
-        const FOV_DOT = Math.cos(80 * Math.PI / 180); // ≈ 0.1736
+        const FOV_DOT = Math.cos(80 * Math.PI / 180);
 
         const wallColor = 0x800080;
         const floorColor = 0x0000ff;
@@ -171,6 +209,7 @@
         let gameFrozen = false;
         let touchingEnemy = null;
         let floorMatRef = null, ceilMatRef = null;
+        let themeAllowed = true; // set false after victory so theme never returns
 
         // -------------------- Audio --------------------
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -259,7 +298,8 @@
             chaseMusicPlaying = false;
             if (chaseMusicTimer) { clearTimeout(chaseMusicTimer); chaseMusicTimer = null; }
 
-            if (noteGame.active || life <= 0) return;
+            if (!themeAllowed) return;
+            if (noteGame.active || life <= 0 || levelComplete) return;
             if (bossSpawned && boss && !boss.dying) return;
             if (!bossAudio.paused) return;
 
@@ -301,7 +341,6 @@
             src.start();
         }
 
-        // -------------------- Background music --------------------
         const themeAudio = new Audio('Theme Music.mp3');
         themeAudio.volume = 0.5;
         const bossAudio = new Audio('Boss Music.mp3');
@@ -334,6 +373,7 @@
         }
         function duckTheme() { themeAudio.volume = 0; }
         function fadeInTheme() {
+            if (!themeAllowed) return;
             if (themeAudio.paused) themeAudio.play().catch(() => {});
             fadeAudio(themeAudio, 0.5, 1000);
         }
@@ -365,7 +405,7 @@
         function jiggleBossBar() {
             const el = document.getElementById('bosswrap');
             el.classList.remove('jiggle');
-            void el.offsetWidth; // restart animation
+            void el.offsetWidth;
             el.classList.add('jiggle');
             setTimeout(() => el.classList.remove('jiggle'), 500);
         }
@@ -385,7 +425,11 @@
             document.getElementById('gameOverScreen').style.display = 'flex';
             themeAudio.pause(); bossAudio.pause();
         }
-        document.getElementById('returnHomeButton').addEventListener('click', () => location.reload());
+        function goHome() {
+            location.reload();
+        }
+        document.getElementById('returnHomeButton').addEventListener('click', goHome);
+        document.getElementById('victoryHomeButton').addEventListener('click', goHome);
 
         // -------------------- Note-reading mini-game --------------------
         const VF = Vex.Flow;
@@ -447,7 +491,6 @@
             noteGame.type = type;
             noteGame.ref = ref || null;
             stopChaseMusic();
-            // First note game (red door) keeps Theme Music playing
             if (type !== 'door1') {
                 themeAudio.pause();
             }
@@ -505,22 +548,18 @@
                 gameFrozen = false;
                 document.getElementById('crosshair').style.display = 'block';
                 document.body.requestPointerLock();
-                // Theme was never stopped for door1
             } else if (noteGame.type === 'enemy') {
                 setLife(Math.min(100, life + 20));
                 playExplosionNoise();
                 const e = noteGame.ref; e.dying = true; e.dieStart = performance.now(); e.diePhase = 0;
             } else if (noteGame.type === 'boss') {
-                // Damage boss by 1/4
-                setBossLife(bossLife - 1);
+                setBossLife(bossLife - BOSS_HIT_DAMAGE);
                 jiggleBossBar();
                 playExplosionNoise();
                 const b = noteGame.ref;
                 if (bossLife <= 0) {
-                    // Final hit – boss dies
                     b.dying = true; b.dieStart = performance.now(); b.diePhase = 0;
                 } else {
-                    // Freeze boss for 3 seconds; player can run away
                     b.frozenUntil = performance.now() + 3000;
                     b.isChasing = false;
                     gameFrozen = false;
@@ -616,7 +655,6 @@
             });
         }
 
-        // -------------------- Create maze --------------------
         function createMaze() {
             while (scene.children.length) scene.remove(scene.children[0]);
             walls = [];
@@ -624,9 +662,11 @@
             doorPanelMaterials = [];
             boss = null; bossSpawned = false; bossLife = BOSS_MAX_LIFE;
             enemies = []; gameFrozen = false; touchingEnemy = null;
-            levelComplete = false;
+            levelComplete = false; themeAllowed = true;
             hideBossLifeBar();
             document.getElementById('levelCompleteText').style.display = 'none';
+            document.getElementById('victoryHomeButton').style.display = 'none';
+            document.getElementById('minimapCanvas').style.display = 'block';
 
             const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
             const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
@@ -710,7 +750,6 @@
             scene.add(new THREE.HemisphereLight(0xffffff, 0xb0c4de, 0.45));
         }
 
-        // -------------------- Enemies & Boss --------------------
         function createEnemy(x, z, isBoss = false) {
             const group = new THREE.Group();
             const radius = isBoss ? 0.8 : ENEMY_RADIUS;
@@ -790,6 +829,7 @@
             if (floorMatRef) { floorMatRef.color.setHex(floorColor); floorMatRef.emissive.setHex(0x000000); }
             if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
             bossAudio.pause();
+            // Do NOT restart theme after boss – only Fanfare on victory
         }
 
         function clearInteriorWalls() {
@@ -826,6 +866,9 @@
             if (bossSpawned) return;
             bossSpawned = true;
 
+            // Hide minimap when boss phase begins
+            document.getElementById('minimapCanvas').style.display = 'none';
+
             clearInteriorWalls();
             enterBossPhase();
             showBossLifeBar();
@@ -842,7 +885,6 @@
             setBossLife(BOSS_MAX_LIFE);
         }
 
-        // -------------------- Collision / vision --------------------
         function checkWallCollision(px, pz, radius) {
             const s = new THREE.Sphere(new THREE.Vector3(px, 1.0, pz), radius);
             for (const w of walls) {
@@ -861,7 +903,6 @@
                 if (Math.sqrt(dx*dx + dz*dz) < player.radius + e.radius) return e;
             }
             if (boss && !boss.dying) {
-                // Don't re-trigger while frozen
                 if (performance.now() < (boss.frozenUntil || 0)) return null;
                 const dx = player.x - boss.x, dz = player.z - boss.z;
                 if (Math.sqrt(dx*dx + dz*dz) < player.radius + boss.radius) return boss;
@@ -892,15 +933,12 @@
             return blocked(e.facing + 0.6) && blocked(e.facing - 0.6);
         }
 
-        // 160° sector vision: player must be within ±80° of facing, and
-        // the ray from enemy center to player must not hit a wall first.
         function canSeePlayer(e) {
             const dx = player.x - e.x, dz = player.z - e.z;
             const dist = Math.sqrt(dx*dx + dz*dz);
             if (dist > 30 || dist < 0.15) return false;
             const dirX = dx/dist, dirZ = dz/dist;
             const fx = Math.sin(e.facing), fz = Math.cos(e.facing);
-            // Dot product ≥ cos(80°) ⇒ within 160° FOV
             if (fx*dirX + fz*dirZ < FOV_DOT) return false;
             const origin = new THREE.Vector3(e.x, e.isBoss ? e.radius : 1.0, e.z);
             const direction = new THREE.Vector3(dirX, 0, dirZ).normalize();
@@ -924,12 +962,12 @@
             }
         }
 
-        // -------------------- Input --------------------
         const keys = {};
         document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
 
         document.addEventListener('click', () => {
+            if (levelComplete) return; // cursor free after victory
             if (document.pointerLockElement === document.body) {
                 tryOpenDoor();
             } else if (!gameFrozen && !noteGame.active) {
@@ -938,6 +976,7 @@
         });
 
         document.addEventListener('mousemove', e => {
+            if (levelComplete) return;
             if (document.pointerLockElement === document.body && !gameFrozen) {
                 yaw   -= e.movementX * mouseSensitivity;
                 pitch -= e.movementY * mouseSensitivity;
@@ -947,11 +986,9 @@
             }
         });
 
-        // -------------------- AI --------------------
         function updateOneEnemy(e, dt) {
             if (e.dying) return false;
 
-            // Boss frozen after a successful note-game hit
             if (e.isBoss && performance.now() < (e.frozenUntil || 0)) {
                 e.isChasing = false;
                 e.group.position.set(e.x, e.radius + 0.05, e.z);
@@ -959,7 +996,6 @@
                 return false;
             }
 
-            // Boss: look around until it sees the player in its 160° FOV
             if (e.isBoss) {
                 if (!e.isChasing) {
                     e.facing += e.lookDir * BOSS_LOOK_SPEED;
@@ -987,7 +1023,6 @@
                 return true;
             }
 
-            // Normal enemies – 160° vision
             e.isChasing = canSeePlayer(e);
 
             const tooClose = !canSeeAhead(e, cellSize * 0.2);
@@ -1042,7 +1077,6 @@
             if (any) startChaseMusic(); else stopChaseMusic();
         }
 
-        // -------------------- Death --------------------
         function updateDying(now) {
             const list = [...enemies];
             if (boss) list.push(boss);
@@ -1066,19 +1100,21 @@
                             boss = null;
                             exitBossPhase();
                             hideBossLifeBar();
-                            // Victory – no freeze, no fade to black
+                            // Victory
+                            themeAllowed = false;
+                            themeAudio.pause();
+                            stopChaseMusic();
                             document.getElementById('levelCompleteText').textContent = 'You Beat The Game!';
                             document.getElementById('levelCompleteText').style.display = 'block';
+                            document.getElementById('victoryHomeButton').style.display = 'block';
                             levelComplete = true;
-                            stopChaseMusic();
+                            document.exitPointerLock();
+                            document.getElementById('crosshair').style.display = 'none';
                             fanfareAudio.currentTime = 0;
                             fanfareAudio.play().catch(() => {});
-                            // Restore control if we were mid note-game recovery
                             if (touchingEnemy === e) {
                                 touchingEnemy = null;
                                 gameFrozen = false;
-                                document.getElementById('crosshair').style.display = 'block';
-                                document.body.requestPointerLock();
                             }
                         } else {
                             enemies = enemies.filter(en => en !== e);
@@ -1100,9 +1136,9 @@
             }
         }
 
-        // -------------------- Minimap --------------------
         function drawMinimap() {
             const canvas = document.getElementById('minimapCanvas');
+            if (canvas.style.display === 'none') return;
             const ctx = canvas.getContext('2d');
             const w = canvas.width, cellPx = w / mazeWidth;
             ctx.fillStyle = 'rgba(20,20,40,0.9)';
@@ -1133,7 +1169,6 @@
             ctx.beginPath(); ctx.arc((player.x/cellSize)*cellPx, (player.z/cellSize)*cellPx, 5, 0, Math.PI*2); ctx.fill();
         }
 
-        // -------------------- Main loop --------------------
         let lastTime = performance.now();
         function animate(now) {
             requestAnimationFrame(animate);
@@ -1149,7 +1184,7 @@
                 }
             }
 
-            if (!gameFrozen) {
+            if (!gameFrozen && !levelComplete) {
                 if (!doorOpen && !doorOpening && door) {
                     const h = isDoorUnderCrosshair();
                     if (h && !isHoveringDoor) {
@@ -1163,45 +1198,42 @@
                 }
             }
 
-            // Movement stays available after victory (levelComplete does not freeze)
             if (!gameFrozen) {
                 let nx = player.x, nz = player.z;
                 const ang = camera.rotation.y;
-                if (keys['w']||keys['arrowup'])    { nx -= Math.sin(ang)*player.speed; nz -= Math.cos(ang)*player.speed; }
-                if (keys['s']||keys['arrowdown'])  { nx += Math.sin(ang)*player.speed; nz += Math.cos(ang)*player.speed; }
-                if (keys['a']||keys['arrowleft'])  { nx -= Math.cos(ang)*player.speed; nz += Math.sin(ang)*player.speed; }
-                if (keys['d']||keys['arrowright']) { nx += Math.cos(ang)*player.speed; nz -= Math.sin(ang)*player.speed; }
+                if (!levelComplete) {
+                    if (keys['w']||keys['arrowup'])    { nx -= Math.sin(ang)*player.speed; nz -= Math.cos(ang)*player.speed; }
+                    if (keys['s']||keys['arrowdown'])  { nx += Math.sin(ang)*player.speed; nz += Math.cos(ang)*player.speed; }
+                    if (keys['a']||keys['arrowleft'])  { nx -= Math.cos(ang)*player.speed; nz += Math.sin(ang)*player.speed; }
+                    if (keys['d']||keys['arrowright']) { nx += Math.cos(ang)*player.speed; nz -= Math.sin(ang)*player.speed; }
 
-                if (!checkWallCollision(nx, player.z, player.radius)) player.x = nx;
-                if (!checkWallCollision(player.x, nz, player.radius)) player.z = nz;
+                    if (!checkWallCollision(nx, player.z, player.radius)) player.x = nx;
+                    if (!checkWallCollision(player.x, nz, player.radius)) player.z = nz;
 
-                const all = [...enemies];
-                if (boss) all.push(boss);
-                for (const e of all) {
-                    if (e.dying) continue;
-                    const dx = player.x - e.x, dz = player.z - e.z;
-                    const dist = Math.sqrt(dx*dx + dz*dz);
-                    if (dist < player.radius + e.radius) {
-                        const push = (player.radius + e.radius - dist) / dist;
-                        player.x += dx * push * 0.5;
-                        player.z += dz * push * 0.5;
+                    const all = [...enemies];
+                    if (boss) all.push(boss);
+                    for (const e of all) {
+                        if (e.dying) continue;
+                        const dx = player.x - e.x, dz = player.z - e.z;
+                        const dist = Math.sqrt(dx*dx + dz*dz);
+                        if (dist < player.radius + e.radius) {
+                            const push = (player.radius + e.radius - dist) / dist;
+                            player.x += dx * push * 0.5;
+                            player.z += dz * push * 0.5;
+                        }
                     }
-                }
 
-                camera.position.set(player.x, 1.1, player.z);
-                updateEnemies(dt);
+                    camera.position.set(player.x, 1.1, player.z);
+                    updateEnemies(dt);
 
-                const hit = checkPlayerEnemyCollision();
-                if (hit && !noteGame.active) {
-                    touchingEnemy = hit;
-                    stopChaseMusic();
-                    if (hit.isBoss) {
-                        // boss music keeps playing; just duck isn't needed
-                    } else {
-                        duckTheme();
+                    const hit = checkPlayerEnemyCollision();
+                    if (hit && !noteGame.active) {
+                        touchingEnemy = hit;
+                        stopChaseMusic();
+                        if (!hit.isBoss) duckTheme();
+                        playTouchChord();
+                        startNoteGame(hit.isBoss ? 'boss' : 'enemy', hit);
                     }
-                    playTouchChord();
-                    startNoteGame(hit.isBoss ? 'boss' : 'enemy', hit);
                 }
             }
 
@@ -1210,7 +1242,6 @@
             renderer.render(scene, camera);
         }
 
-        // -------------------- Start --------------------
         document.getElementById('startButton').addEventListener('click', () => {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             document.getElementById('startScreen').style.display = 'none';
@@ -1221,6 +1252,7 @@
             generateMaze();
             createMaze();
             spawnEnemies();
+            themeAllowed = true;
             themeAudio.currentTime = 0; themeAudio.volume = 0.5; themeAudio.play().catch(()=>{});
             lastTime = performance.now();
             animate(lastTime);
