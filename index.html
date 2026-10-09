@@ -173,6 +173,8 @@
         const BRICK_TEXTURE_FILE = 'brick.jpg';
         // How many world units one copy of the brick image covers (smaller = smaller bricks).
         const BRICK_TILE_SIZE = 1.1;
+        // Multiplies the brick image's color. 0xffffff = unchanged, lower = darker.
+        const BRICK_TINT = 0x777777;
 
         const textureLoader = new THREE.TextureLoader();
         const wallMaterialCache = {};
@@ -195,7 +197,7 @@
                     tex.repeat.set(length / BRICK_TILE_SIZE, wallHeight / BRICK_TILE_SIZE);
                     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     mat.map = tex;
-                    mat.color.setHex(0xffffff);
+                    mat.color.setHex(BRICK_TINT);
                     mat.needsUpdate = true;
                 },
                 undefined,
