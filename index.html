@@ -167,6 +167,43 @@
         const wallHeight = 2.2;
         const wallThickness = 0.12;
 
+        // -------------------- Brick texture settings --------------------
+        // Put your brick image in the same folder as this HTML file.
+        // NOTE: GitHub Pages is case-sensitive, so the name must match exactly.
+        const BRICK_TEXTURE_FILE = 'brick.jpg';
+        // How many world units one copy of the brick image covers (smaller = smaller bricks).
+        const BRICK_TILE_SIZE = 1.1;
+
+        const textureLoader = new THREE.TextureLoader();
+        const wallMaterialCache = {};
+
+        // Returns a wall material whose brick texture is repeated so bricks keep
+        // the same size no matter how long the wall segment is.
+        function getWallMaterial(length) {
+            const key = length.toFixed(3);
+            if (wallMaterialCache[key]) return wallMaterialCache[key];
+
+            // Fallback (purple) is shown until the image loads, or if it fails to load.
+            const mat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.85 });
+            wallMaterialCache[key] = mat;
+
+            textureLoader.load(
+                BRICK_TEXTURE_FILE,
+                tex => {
+                    tex.wrapS = THREE.RepeatWrapping;
+                    tex.wrapT = THREE.RepeatWrapping;
+                    tex.repeat.set(length / BRICK_TILE_SIZE, wallHeight / BRICK_TILE_SIZE);
+                    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    mat.map = tex;
+                    mat.color.setHex(0xffffff);
+                    mat.needsUpdate = true;
+                },
+                undefined,
+                () => console.warn('Could not load brick texture: ' + BRICK_TEXTURE_FILE + ' (using plain color walls)')
+            );
+            return mat;
+        }
+
         const player = { x: 2.4, z: 2.4, speed: 0.12, radius: 0.28 };
         camera.position.set(player.x, 1.1, player.z);
         camera.rotation.order = 'YXZ';
@@ -670,7 +707,8 @@
             document.getElementById('victoryHomeButton').style.display = 'none';
             document.getElementById('minimapCanvas').style.display = 'block';
 
-            const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
+            // Brick material for full-length wall segments (cellSize long)
+            const wallMat = getWallMaterial(cellSize);
             const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
             const ceilMat  = new THREE.MeshStandardMaterial({ color: ceilingColor, roughness: 0.8 });
             floorMatRef = floorMat; ceilMatRef = ceilMat;
@@ -730,13 +768,15 @@
             door.position.set(2 * cellSize, wallHeight/2, 1 * cellSize + cellSize/2);
             scene.add(door);
 
+            // Short wall pieces beside the door use their own brick repeat
             const sideW = (cellSize - doorWidth) / 2;
+            const sideMat = getWallMaterial(sideW);
             const sideGeo = new THREE.BoxGeometry(wallThickness, wallHeight, sideW);
-            const s1 = new THREE.Mesh(sideGeo, wallMat);
+            const s1 = new THREE.Mesh(sideGeo, sideMat);
             s1.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 - doorWidth/2 - sideW/2);
             s1.userData.isOuter = false;
             scene.add(s1); walls.push(s1);
-            const s2 = new THREE.Mesh(sideGeo, wallMat);
+            const s2 = new THREE.Mesh(sideGeo, sideMat);
             s2.position.set(2*cellSize, wallHeight/2, 1*cellSize + cellSize/2 + doorWidth/2 + sideW/2);
             s2.userData.isOuter = false;
             scene.add(s2); walls.push(s2);
