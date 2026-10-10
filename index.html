@@ -185,6 +185,13 @@
         // Multiplies the floor image's color. Lower = darker. Adjust to taste.
         const FLOOR_TINT = 0x555555;
 
+        // Ceiling
+        const CEILING_TEXTURE_FILE = 'ceiling.jpeg';
+        // World units covered by one copy of the ceiling image (smaller = smaller tiles).
+        const CEILING_TILE_SIZE = 1.2;
+        // Multiplies the ceiling image's color. Lower = darker. Adjust to taste.
+        const CEILING_TINT = 0x888888;
+
         const textureLoader = new THREE.TextureLoader();
         const wallMaterialCache = {};
 
@@ -216,10 +223,8 @@
         }
 
         // Creates the floor material. The tile pattern repeats so tiles keep the same size.
-        // userData.baseColor is the color the floor returns to after the boss fight.
         function createFloorMaterial(width, depth) {
             const mat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
-            mat.userData.baseColor = floorColor;
 
             textureLoader.load(
                 FLOOR_TEXTURE_FILE,
@@ -229,13 +234,33 @@
                     tex.repeat.set(width / FLOOR_TILE_SIZE, depth / FLOOR_TILE_SIZE);
                     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     mat.map = tex;
-                    mat.userData.baseColor = FLOOR_TINT;
-                    // Don't override the red boss-phase color if the image loads late.
-                    if (!bossSpawned) mat.color.setHex(FLOOR_TINT);
+                    mat.color.setHex(FLOOR_TINT);
                     mat.needsUpdate = true;
                 },
                 undefined,
                 () => console.warn('Could not load floor texture: ' + FLOOR_TEXTURE_FILE + ' (using plain color floor)')
+            );
+            return mat;
+        }
+
+        // Creates the ceiling material. The tile pattern repeats so tiles keep the same size.
+        function createCeilingMaterial(width, depth) {
+            // Fallback (light blue) is shown until the image loads, or if it fails to load.
+            const mat = new THREE.MeshStandardMaterial({ color: ceilingColor, roughness: 0.9 });
+
+            textureLoader.load(
+                CEILING_TEXTURE_FILE,
+                tex => {
+                    tex.wrapS = THREE.RepeatWrapping;
+                    tex.wrapT = THREE.RepeatWrapping;
+                    tex.repeat.set(width / CEILING_TILE_SIZE, depth / CEILING_TILE_SIZE);
+                    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    mat.map = tex;
+                    mat.color.setHex(CEILING_TINT);
+                    mat.needsUpdate = true;
+                },
+                undefined,
+                () => console.warn('Could not load ceiling texture: ' + CEILING_TEXTURE_FILE + ' (using plain color ceiling)')
             );
             return mat;
         }
@@ -281,7 +306,6 @@
         const BOSS_LOOK_SPEED = 0.025;
         let gameFrozen = false;
         let touchingEnemy = null;
-        let floorMatRef = null, ceilMatRef = null;
         let themeAllowed = true;
 
         // -------------------- Audio --------------------
@@ -730,6 +754,14 @@
             });
         }
 
+        // Normal (white) lights are tracked so they can be dimmed during the boss fight
+        let baseLights = [];
+        function addBaseLight(l) {
+            l.userData.base = l.intensity;
+            scene.add(l);
+            baseLights.push(l);
+        }
+
         function createMaze() {
             while (scene.children.length) scene.remove(scene.children[0]);
             walls = [];
@@ -738,6 +770,8 @@
             boss = null; bossSpawned = false; bossLife = BOSS_MAX_LIFE;
             enemies = []; gameFrozen = false; touchingEnemy = null;
             levelComplete = false; themeAllowed = true;
+            baseLights = [];
+            bossRedLights = [];
             hideBossLifeBar();
             document.getElementById('levelCompleteText').style.display = 'none';
             document.getElementById('victoryHomeButton').style.display = 'none';
@@ -746,8 +780,7 @@
             // Brick material for full-length wall segments (cellSize long)
             const wallMat = getWallMaterial(cellSize);
             const floorMat = createFloorMaterial(mazeWidth*cellSize, mazeHeight*cellSize);
-            const ceilMat  = new THREE.MeshStandardMaterial({ color: ceilingColor, roughness: 0.8 });
-            floorMatRef = floorMat; ceilMatRef = ceilMat;
+            const ceilMat  = createCeilingMaterial(mazeWidth*cellSize, mazeHeight*cellSize);
 
             const floorGeo = new THREE.PlaneGeometry(mazeWidth*cellSize, mazeHeight*cellSize);
             const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -817,15 +850,15 @@
             s2.userData.isOuter = false;
             scene.add(s2); walls.push(s2);
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            addBaseLight(new THREE.AmbientLight(0xffffff, 0.6));
             for (let x = 0; x < mazeWidth; x += 1.5) {
                 for (let z = 0; z < mazeHeight; z += 1.5) {
                     const l = new THREE.PointLight(0xfff8e7, 0.9, 14, 1.1);
                     l.position.set(x*cellSize + cellSize/2, wallHeight-0.2, z*cellSize + cellSize/2);
-                    scene.add(l);
+                    addBaseLight(l);
                 }
             }
-            scene.add(new THREE.HemisphereLight(0xffffff, 0xb0c4de, 0.45));
+            addBaseLight(new THREE.HemisphereLight(0xffffff, 0xb0c4de, 0.45));
         }
 
         function createEnemy(x, z, isBoss = false) {
@@ -896,21 +929,38 @@
             }
         }
 
-        let bossRedLight = null;
+        // -------------------- Boss-fight red lighting --------------------
+        // The floor, walls and ceiling keep their textures. Instead, the normal lights
+        // are dimmed and red lights are added, so everything is lit reddish.
+        let bossRedLights = [];
+        const BOSS_BASE_LIGHT_SCALE = 0.45;   // how much the normal lights dim during the boss fight
+        const BOSS_RED_POINT_INTENSITY = 1.8; // strength of each red point light
+        const BOSS_RED_AMBIENT_INTENSITY = 0.3;
+
         function enterBossPhase() {
-            if (ceilMatRef) ceilMatRef.color.setHex(0x000000);
-            // Red color multiplies the floor texture, giving a red-tinted floor
-            if (floorMatRef) { floorMatRef.color.setHex(0xff0000); floorMatRef.emissive.setHex(0x550000); }
-            bossRedLight = new THREE.AmbientLight(0xff2222, 0.6);
-            scene.add(bossRedLight);
+            baseLights.forEach(l => l.intensity = l.userData.base * BOSS_BASE_LIGHT_SCALE);
+
+            const amb = new THREE.AmbientLight(0xff2222, BOSS_RED_AMBIENT_INTENSITY);
+            amb.userData.base = BOSS_RED_AMBIENT_INTENSITY;
+            scene.add(amb);
+            bossRedLights.push(amb);
+
+            const W = mazeWidth * cellSize, H = mazeHeight * cellSize;
+            [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75], [0.5, 0.5]].forEach(([fx, fz]) => {
+                const l = new THREE.PointLight(0xff1a1a, BOSS_RED_POINT_INTENSITY, 16, 1.1);
+                l.userData.base = BOSS_RED_POINT_INTENSITY;
+                l.position.set(W * fx, wallHeight - 0.3, H * fz);
+                scene.add(l);
+                bossRedLights.push(l);
+            });
+
             themeAudio.pause();
             bossAudio.currentTime = 0; bossAudio.volume = 0.5; bossAudio.play().catch(()=>{});
         }
         function exitBossPhase() {
-            if (ceilMatRef) ceilMatRef.color.setHex(ceilingColor);
-            // Restore the floor's normal color (tinted texture, or plain blue if no image)
-            if (floorMatRef) { floorMatRef.color.setHex(floorMatRef.userData.baseColor); floorMatRef.emissive.setHex(0x000000); }
-            if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
+            bossRedLights.forEach(l => scene.remove(l));
+            bossRedLights = [];
+            baseLights.forEach(l => l.intensity = l.userData.base);
             bossAudio.pause();
         }
 
@@ -1340,6 +1390,13 @@
 
             updateDying(now);
             drawMinimap();
+
+            // Slow pulse of the red boss-fight lights (delete this block for a steady glow)
+            if (bossRedLights.length) {
+                const pulse = 0.85 + 0.15 * Math.sin(now / 300);
+                bossRedLights.forEach(l => l.intensity = l.userData.base * pulse);
+            }
+
             renderer.render(scene, camera);
         }
 
