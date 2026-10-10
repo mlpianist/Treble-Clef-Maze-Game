@@ -167,14 +167,23 @@
         const wallHeight = 2.2;
         const wallThickness = 0.12;
 
-        // -------------------- Brick texture settings --------------------
-        // Put your brick image in the same folder as this HTML file.
-        // NOTE: GitHub Pages is case-sensitive, so the name must match exactly.
+        // -------------------- Texture settings --------------------
+        // Put your image files in the same folder as this HTML file.
+        // NOTE: GitHub Pages is case-sensitive, so names must match exactly.
+
+        // Walls
         const BRICK_TEXTURE_FILE = 'brick.jpg';
-        // How many world units one copy of the brick image covers (smaller = smaller bricks).
+        // World units covered by one copy of the brick image (smaller = smaller bricks).
         const BRICK_TILE_SIZE = 1.1;
         // Multiplies the brick image's color. 0xffffff = unchanged, lower = darker.
-        const BRICK_TINT = 0x333333;
+        const BRICK_TINT = 0x444444;
+
+        // Floor
+        const FLOOR_TEXTURE_FILE = 'floor.jpeg';
+        // World units covered by one copy of the floor image (smaller = smaller tiles).
+        const FLOOR_TILE_SIZE = 1.2;
+        // Multiplies the floor image's color. Lower = darker. Adjust to taste.
+        const FLOOR_TINT = 0x555555;
 
         const textureLoader = new THREE.TextureLoader();
         const wallMaterialCache = {};
@@ -202,6 +211,31 @@
                 },
                 undefined,
                 () => console.warn('Could not load brick texture: ' + BRICK_TEXTURE_FILE + ' (using plain color walls)')
+            );
+            return mat;
+        }
+
+        // Creates the floor material. The tile pattern repeats so tiles keep the same size.
+        // userData.baseColor is the color the floor returns to after the boss fight.
+        function createFloorMaterial(width, depth) {
+            const mat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
+            mat.userData.baseColor = floorColor;
+
+            textureLoader.load(
+                FLOOR_TEXTURE_FILE,
+                tex => {
+                    tex.wrapS = THREE.RepeatWrapping;
+                    tex.wrapT = THREE.RepeatWrapping;
+                    tex.repeat.set(width / FLOOR_TILE_SIZE, depth / FLOOR_TILE_SIZE);
+                    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    mat.map = tex;
+                    mat.userData.baseColor = FLOOR_TINT;
+                    // Don't override the red boss-phase color if the image loads late.
+                    if (!bossSpawned) mat.color.setHex(FLOOR_TINT);
+                    mat.needsUpdate = true;
+                },
+                undefined,
+                () => console.warn('Could not load floor texture: ' + FLOOR_TEXTURE_FILE + ' (using plain color floor)')
             );
             return mat;
         }
@@ -711,7 +745,7 @@
 
             // Brick material for full-length wall segments (cellSize long)
             const wallMat = getWallMaterial(cellSize);
-            const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
+            const floorMat = createFloorMaterial(mazeWidth*cellSize, mazeHeight*cellSize);
             const ceilMat  = new THREE.MeshStandardMaterial({ color: ceilingColor, roughness: 0.8 });
             floorMatRef = floorMat; ceilMatRef = ceilMat;
 
@@ -865,6 +899,7 @@
         let bossRedLight = null;
         function enterBossPhase() {
             if (ceilMatRef) ceilMatRef.color.setHex(0x000000);
+            // Red color multiplies the floor texture, giving a red-tinted floor
             if (floorMatRef) { floorMatRef.color.setHex(0xff0000); floorMatRef.emissive.setHex(0x550000); }
             bossRedLight = new THREE.AmbientLight(0xff2222, 0.6);
             scene.add(bossRedLight);
@@ -873,7 +908,8 @@
         }
         function exitBossPhase() {
             if (ceilMatRef) ceilMatRef.color.setHex(ceilingColor);
-            if (floorMatRef) { floorMatRef.color.setHex(floorColor); floorMatRef.emissive.setHex(0x000000); }
+            // Restore the floor's normal color (tinted texture, or plain blue if no image)
+            if (floorMatRef) { floorMatRef.color.setHex(floorMatRef.userData.baseColor); floorMatRef.emissive.setHex(0x000000); }
             if (bossRedLight) { scene.remove(bossRedLight); bossRedLight = null; }
             bossAudio.pause();
         }
